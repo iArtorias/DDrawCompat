@@ -31,6 +31,9 @@
 #include <Shaders/PaletteLookup.h>
 #include <Shaders/Point.h>
 #include <Shaders/PointNoFilter.h>
+#include <Shaders/StencilLockRef.h>
+#include <Shaders/StencilRead.h>
+#include <Shaders/StencilWrite.h>
 #include <Shaders/TextureSampler.h>
 
 #define CONCAT_(a, b) a##b
@@ -41,6 +44,8 @@ namespace
 {
 	const UINT BLT_SRCALPHA = 1;
 	const UINT BLT_PREMULTIPLIED = 2;
+	const UINT BLT_ALPHAONLY = 4;
+	const UINT BLT_CLEAR = 8;
 
 	const UINT CF_HORIZONTAL = 1;
 	const UINT CF_GAMMARAMP = 2;
@@ -122,6 +127,9 @@ namespace D3dDdi
 		, m_psPaletteLookup(createPixelShader(g_psPaletteLookup))
 		, m_psPoint(createPixelShader(g_psPoint))
 		, m_psPointNoFilter(createPixelShader(g_psPointNoFilter))
+		, m_psStencilLockRef(createPixelShader(g_psStencilLockRef))
+		, m_psStencilRead(createPixelShader(g_psStencilRead))
+		, m_psStencilWrite(createPixelShader(g_psStencilWrite))
 		, m_psTextureSampler(createPixelShader(g_psTextureSampler))
 		, m_vertexShaderDecl(createVertexShaderDecl())
 		, m_convolutionParams{}
@@ -242,9 +250,16 @@ namespace D3dDdi
 		state.setTempRenderState({ D3DDDIRS_CLIPPING, FALSE });
 		state.setTempRenderState({ D3DDDIRS_CLIPPLANEENABLE, 0 });
 		state.setTempRenderState({ D3DDDIRS_MULTISAMPLEANTIALIAS, FALSE });
-		state.setTempRenderState({ D3DDDIRS_COLORWRITEENABLE, 0xF });
+		state.setTempRenderState({ D3DDDIRS_COLORWRITEENABLE, (flags & BLT_ALPHAONLY) ? 0x8U : 0xF });
 		state.setTempRenderState({ D3DDDIRS_SCISSORTESTENABLE, FALSE });
 		state.setTempRenderState({ D3DDDIRS_SRGBWRITEENABLE, srgbWrite });
+
+		if (flags & BLT_CLEAR)
+		{
+			D3DDDIARG_CLEAR clear = {};
+			clear.Flags = D3DCLEAR_TARGET;
+			m_device.getOrigVtable().pfnClear(m_device, &clear, 1, &dstRect);
+		}
 
 		if (alpha)
 		{
@@ -566,10 +581,12 @@ namespace D3dDdi
 	}
 
 	void ShaderBlitter::depthCopy(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
-		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect)
+		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+		const Resource* stencilResolvedResource)
 	{
 		LOG_FUNC("ShaderBlitter::depthCopy", static_cast<HANDLE>(dstResource), dstSubResourceIndex, dstRect,
-			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect);
+			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect,
+			stencilResolvedResource ? static_cast<HANDLE>(*stencilResolvedResource) : nullptr);
 
 		const DeviceState::TempShader* ps = nullptr;
 		const auto srcFormat = srcResource.getFixedDesc().Format;
@@ -584,17 +601,24 @@ namespace D3dDdi
 			{
 				ps = is16BitSrc ? &m_psDepthCopyPcf16 : &m_psDepthCopyPcf24;
 			}
-			depthWrite(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect, *ps);
-			return;
+			depthWrite(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect, *ps, nullptr);
+		}
+		else
+		{
+			const RECT rect = { 0, 0, srcRect.right - srcRect.left, srcRect.bottom - srcRect.top };
+			const auto& rtt = m_device.getRepo().getTempTexture(rect.right, rect.bottom,
+				is16BitSrc ? D3DDDIFMT_R5G6B5 : D3DDDIFMT_A8R8G8B8);
+			if (rtt.resource)
+			{
+				depthRead(*rtt.resource, 0, rect, srcResource, srcSubResourceIndex, srcRect, nullptr);
+				depthWrite(dstResource, dstSubResourceIndex, dstRect, *rtt.resource, 0, rect, nullptr);
+			}
 		}
 
-		const RECT rect = { 0, 0, srcRect.right - srcRect.left, srcRect.bottom - srcRect.top };
-		const auto& rtt = m_device.getRepo().getTempTexture(rect.right, rect.bottom,
-			is16BitSrc ? D3DDDIFMT_R5G6B5 : D3DDDIFMT_A8R8G8B8);
-		if (rtt.resource)
+		if (stencilResolvedResource)
 		{
-			depthRead(*rtt.resource, 0, rect, srcResource, srcSubResourceIndex, srcRect);
-			depthWrite(dstResource, dstSubResourceIndex, dstRect, *rtt.resource, 0, rect);
+			stencilCopy(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect,
+				*stencilResolvedResource);
 		}
 	}
 
@@ -608,27 +632,37 @@ namespace D3dDdi
 
 		setTempTextureStage(1, lockRefResource, srcSubResourceIndex, srcRect, D3DTEXF_POINT);
 		depthWrite(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect,
-			D3DDDIFMT_R5G6B5 == srcResource.getFixedDesc().Format ? m_psDepthLockRef16 : m_psDepthLockRef24);
+			D3DDDIFMT_R5G6B5 == srcResource.getFixedDesc().Format ? m_psDepthLockRef16 : m_psDepthLockRef24, nullptr);
 	}
 
 	void ShaderBlitter::depthRead(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
-		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect)
+		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+		const Resource* stencilResolvedResource)
 	{
 		LOG_FUNC("ShaderBlitter::depthRead", static_cast<HANDLE>(dstResource), dstSubResourceIndex, dstRect,
-			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect);
+			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect,
+			stencilResolvedResource ? static_cast<HANDLE>(*stencilResolvedResource) : nullptr);
 
 		const auto& ps = srcResource.getFixedDesc().Format > 0xFF
 			? (D3DDDIFMT_R5G6B5 == dstResource.getFixedDesc().Format ? m_psDepthRead16 : m_psDepthRead24)
 			: (D3DDDIFMT_R5G6B5 == dstResource.getFixedDesc().Format ? m_psDepthReadPcf16 : m_psDepthReadPcf24);
 
-		blt(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect, ps, D3DTEXF_POINT);
+		blt(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect,
+			ps, D3DTEXF_POINT, stencilResolvedResource ? BLT_CLEAR : 0);
+		if (stencilResolvedResource)
+		{
+			stencilRead(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect,
+				*stencilResolvedResource);
+		}
 	}
 
 	void ShaderBlitter::depthWrite(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
-		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect, const DeviceState::TempShader& ps)
+		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect, const DeviceState::TempShader& ps,
+		const Resource* stencilResolvedResource)
 	{
 		LOG_FUNC("ShaderBlitter::depthWrite", static_cast<HANDLE>(dstResource), dstSubResourceIndex, dstRect,
-			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect, ps.shader.get());
+			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect, ps.shader.get(),
+			stencilResolvedResource ? static_cast<HANDLE>(*stencilResolvedResource) : nullptr);
 
 		const auto& dstSurface = dstResource.getFixedDesc().pSurfList[dstSubResourceIndex];
 
@@ -662,16 +696,27 @@ namespace D3dDdi
 		setTempTextureStage(0, srcResource, 0, srcRect, D3DTEXF_POINT);
 
 		drawRect(Rect::toRectF(dstRect));
+
+		if (stencilResolvedResource)
+		{
+			const bool useLockRef = (&ps == &m_psDepthLockRef16 || &ps == &m_psDepthLockRef24) &&
+				(D3DDDIMULTISAMPLE_NONE != dstResource.getFixedDesc().MultisampleType || dstRect != srcRect);
+			stencilWrite(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect,
+				useLockRef ? m_psStencilLockRef : m_psStencilWrite);
+		}
 	}
 
 	void ShaderBlitter::depthWrite(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
-		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect)
+		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+		const Resource* stencilResolvedResource)
 	{
 		LOG_FUNC("ShaderBlitter::depthWrite", static_cast<HANDLE>(dstResource), dstSubResourceIndex, dstRect,
-			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect);
+			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect,
+			stencilResolvedResource ? static_cast<HANDLE>(*stencilResolvedResource) : nullptr);
 
 		depthWrite(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect,
-			D3DDDIFMT_R5G6B5 == srcResource.getFixedDesc().Format ? m_psDepthWrite16 : m_psDepthWrite24);
+			D3DDDIFMT_R5G6B5 == srcResource.getFixedDesc().Format ? m_psDepthWrite16 : m_psDepthWrite24,
+			stencilResolvedResource);
 	}
 
 	void ShaderBlitter::displayBlt(Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
@@ -882,6 +927,153 @@ namespace D3dDdi
 
 		convolutionBlt(dstResource, dstSubResourceIndex, dstRect, srcResource, srcSubResourceIndex, srcRect,
 			lobes, m_psCubicConvolution[lobes - 2]);
+	}
+
+	void ShaderBlitter::stencilCopy(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
+		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+		const Resource& stencilResolvedResource)
+	{
+		LOG_FUNC("ShaderBlitter::stencilCopy", static_cast<HANDLE>(dstResource), dstSubResourceIndex, dstRect,
+			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect, static_cast<HANDLE>(stencilResolvedResource));
+
+		stencilRead(stencilResolvedResource, srcSubResourceIndex, srcRect, srcResource, srcSubResourceIndex, srcRect,
+			stencilResolvedResource);
+		stencilWrite(dstResource, dstSubResourceIndex, dstRect, stencilResolvedResource, srcSubResourceIndex, srcRect,
+			m_psStencilWrite);
+	}
+
+	void ShaderBlitter::stencilRead(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
+		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+		const Resource& stencilResolvedResource)
+	{
+		LOG_FUNC("ShaderBlitter::stencilRead", static_cast<HANDLE>(dstResource), dstSubResourceIndex, dstRect,
+			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect, static_cast<HANDLE>(stencilResolvedResource));
+
+		const auto& srcSurface = srcResource.getFixedDesc().pSurfList[srcSubResourceIndex];
+		const auto& dstSurface = dstResource.getFixedDesc().pSurfList[dstSubResourceIndex];
+		if (srcRect != dstRect || srcSurface.Width != dstSurface.Width || srcSurface.Height != dstSurface.Height)
+		{
+			auto& state = m_device.getState();
+			state.setTempRenderTarget({ 0, stencilResolvedResource, srcSubResourceIndex });
+			state.setTempRenderState({ D3DDDIRS_SCISSORTESTENABLE, FALSE });
+
+			stencilRead(stencilResolvedResource, srcSubResourceIndex, srcRect,
+				srcResource, srcSubResourceIndex, srcRect, stencilResolvedResource);
+			blt(dstResource, dstSubResourceIndex, dstRect,
+				stencilResolvedResource, srcSubResourceIndex, srcRect,
+				m_psTextureSampler, D3DTEXF_POINT, BLT_ALPHAONLY);
+			return;
+		}
+
+		auto& state = m_device.getState();
+		state.setTempRenderTarget({ 0, dstResource, dstSubResourceIndex });
+		state.setTempDepthStencil({ srcResource });
+		state.setTempViewport({ 0, 0, dstSurface.Width, dstSurface.Height });
+		state.setTempZRange({ 0, 1 });
+		state.setTempPixelShader(m_psStencilRead);
+		state.setTempVertexShaderDecl(m_vertexShaderDecl.get());
+
+		state.setTempRenderState({ D3DDDIRS_SCENECAPTURE, TRUE });
+		state.setTempRenderState({ D3DDDIRS_ZENABLE, D3DZB_FALSE });
+		state.setTempRenderState({ D3DDDIRS_FILLMODE, D3DFILL_SOLID });
+		state.setTempRenderState({ D3DDDIRS_ZWRITEENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_ALPHATESTENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_CULLMODE, D3DCULL_NONE });
+		state.setTempRenderState({ D3DDDIRS_DITHERENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_ALPHABLENDENABLE, TRUE });
+		state.setTempRenderState({ D3DDDIRS_FOGENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_COLORKEYENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_STENCILENABLE, TRUE });
+		state.setTempRenderState({ D3DDDIRS_CLIPPING, FALSE });
+		state.setTempRenderState({ D3DDDIRS_CLIPPLANEENABLE, 0 });
+		state.setTempRenderState({ D3DDDIRS_MULTISAMPLEANTIALIAS, FALSE });
+		state.setTempRenderState({ D3DDDIRS_COLORWRITEENABLE, 0xF });
+		state.setTempRenderState({ D3DDDIRS_SCISSORTESTENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_SRGBWRITEENABLE, FALSE });
+
+		if (&dstResource == &stencilResolvedResource)
+		{
+			D3DDDIARG_CLEAR clear = {};
+			clear.Flags = D3DCLEAR_TARGET;
+			m_device.getOrigVtable().pfnClear(m_device, &clear, 1, &dstRect);
+		}
+
+		const UINT D3DBLEND_ONE = 2;
+		state.setTempRenderState({ D3DDDIRS_SRCBLEND, D3DBLEND_ONE });
+		state.setTempRenderState({ D3DDDIRS_DESTBLEND, D3DBLEND_ONE });
+
+		state.setTempRenderState({ D3DDDIRS_STENCILFUNC, D3DCMP_EQUAL });
+		state.setTempRenderState({ D3DDDIRS_STENCILREF, 0xFF });
+		state.setTempRenderState({ D3DDDIRS_STENCILFAIL, D3DSTENCILOP_KEEP });
+		state.setTempRenderState({ D3DDDIRS_STENCILPASS, D3DSTENCILOP_KEEP });
+
+		D3DDDIARG_SETPIXELSHADERCONST psConst = { 200, 1 };
+		DeviceState::ShaderConstF color = {};
+		for (unsigned i = 0; i < 8; ++i)
+		{
+			const unsigned bit = 1U << i;
+			color[3] = bit / 255.0f;
+			m_device.getOrigVtable().pfnSetPixelShaderConst(m_device, &psConst, &color[0]);
+			state.setTempRenderState({ D3DDDIRS_STENCILMASK, bit });
+			drawRect(Rect::toRectF(dstRect));
+		}
+	}
+
+	void ShaderBlitter::stencilWrite(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
+		const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+		const DeviceState::TempShader& ps)
+	{
+		LOG_FUNC("ShaderBlitter::stencilWrite", static_cast<HANDLE>(dstResource), dstSubResourceIndex, dstRect,
+			static_cast<HANDLE>(srcResource), srcSubResourceIndex, srcRect, ps.shader.get());
+
+		const auto& dstSurface = dstResource.getFixedDesc().pSurfList[dstSubResourceIndex];
+
+		auto& state = m_device.getState();
+		state.setTempRenderTarget({ 0, dstResource.getNullRtHandle(), dstSubResourceIndex });
+		state.setTempDepthStencil({ dstResource });
+		state.setTempViewport({ 0, 0, dstSurface.Width, dstSurface.Height });
+		state.setTempZRange({ 0, 1 });
+		state.setTempPixelShader(m_psStencilWrite);
+		state.setTempVertexShaderDecl(m_vertexShaderDecl.get());
+
+		state.setTempRenderState({ D3DDDIRS_SCENECAPTURE, TRUE });
+		state.setTempRenderState({ D3DDDIRS_ZENABLE, D3DZB_FALSE });
+		state.setTempRenderState({ D3DDDIRS_FILLMODE, D3DFILL_SOLID });
+		state.setTempRenderState({ D3DDDIRS_ZWRITEENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_ALPHATESTENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_CULLMODE, D3DCULL_NONE });
+		state.setTempRenderState({ D3DDDIRS_DITHERENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_ALPHABLENDENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_FOGENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_COLORKEYENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_STENCILENABLE, TRUE });
+		state.setTempRenderState({ D3DDDIRS_CLIPPING, FALSE });
+		state.setTempRenderState({ D3DDDIRS_CLIPPLANEENABLE, 0 });
+		state.setTempRenderState({ D3DDDIRS_MULTISAMPLEANTIALIAS, FALSE });
+		state.setTempRenderState({ D3DDDIRS_COLORWRITEENABLE, 0 });
+		state.setTempRenderState({ D3DDDIRS_SCISSORTESTENABLE, FALSE });
+		state.setTempRenderState({ D3DDDIRS_SRGBWRITEENABLE, FALSE });
+
+		state.setTempRenderState({ D3DDDIRS_STENCILFUNC, D3DCMP_ALWAYS });
+		state.setTempRenderState({ D3DDDIRS_STENCILREF, 0xFF });
+		state.setTempRenderState({ D3DDDIRS_STENCILPASS, D3DSTENCILOP_REPLACE });
+
+		setTempTextureStage(0, srcResource, 0, srcRect, D3DTEXF_POINT);
+
+		D3DDDIARG_CLEAR clear = {};
+		clear.Flags = D3DCLEAR_STENCIL;
+		m_device.getOrigVtable().pfnClear(m_device, &clear, 1, &dstRect);
+
+		D3DDDIARG_SETPIXELSHADERCONST psConst = { 200, 1 };
+		DeviceState::ShaderConstF multiplier = {};
+		for (unsigned i = 0; i < 8; ++i)
+		{
+			const unsigned bit = 1U << i;
+			multiplier[0] = 1.0f / bit;
+			m_device.getOrigVtable().pfnSetPixelShaderConst(m_device, &psConst, &multiplier[0]);
+			state.setTempRenderState({ D3DDDIRS_STENCILWRITEMASK, bit });
+			drawRect(Rect::toRectF(dstRect));
+		}
 	}
 
 	void ShaderBlitter::textureBlt(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,

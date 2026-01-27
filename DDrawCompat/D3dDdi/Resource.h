@@ -149,6 +149,7 @@ namespace D3dDdi
 		SurfaceRepository::ScopedSurface m_nullRt;
 		SurfaceRepository::ScopedSurface m_paletteResolvedSurface;
 		SurfaceRepository::ScopedSurface m_colorKeyedSurface;
+		SurfaceRepository::ScopedSurface m_stencilResolvedSurface;
 		UINT m_colorKey;
 		D3DDDIFORMAT m_formatConfig;
 		std::pair<D3DDDIMULTISAMPLE_TYPE, UINT> m_multiSampleConfig;

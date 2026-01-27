@@ -45,14 +45,17 @@ namespace D3dDdi
 		void cursorBlt(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
 			HCURSOR cursor, POINT pt);
 		void depthCopy(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
-			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect);
+			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+			const Resource* stencilResolvedResource);
 		void depthLockRefBlt(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
 			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
 			const Resource& lockRefResource);
 		void depthRead(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
-			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect);
+			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+			const Resource* stencilResolvedResource);
 		void depthWrite(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
-			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect);
+			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+			const Resource* stencilResolvedResource);
 		void displayBlt(Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
 			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect);
 		void lanczosBlt(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
@@ -116,7 +119,17 @@ namespace D3dDdi
 			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
 			Float2 support, const DeviceState::TempShader& ps, const std::function<void(bool)> setExtraParams = {});
 		void depthWrite(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
-			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect, const DeviceState::TempShader& ps);
+			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+			const DeviceState::TempShader& ps, const Resource* stencilResolvedResource);
+		void stencilCopy(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
+			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+			const Resource& stencilResolvedResource);
+		void stencilRead(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
+			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+			const Resource& stencilResolvedResource);
+		void stencilWrite(const Resource& dstResource, UINT dstSubResourceIndex, const RECT& dstRect,
+			const Resource& srcResource, UINT srcSubResourceIndex, const RECT& srcRect,
+			const DeviceState::TempShader& ps);
 
 		template <int N>
 		DeviceState::TempShader createPixelShader(const BYTE(&code)[N])
@@ -156,6 +169,9 @@ namespace D3dDdi
 		DeviceState::TempShader m_psPaletteLookup;
 		DeviceState::TempShader m_psPoint;
 		DeviceState::TempShader m_psPointNoFilter;
+		DeviceState::TempShader m_psStencilLockRef;
+		DeviceState::TempShader m_psStencilRead;
+		DeviceState::TempShader m_psStencilWrite;
 		DeviceState::TempShader m_psTextureSampler;
 		std::unique_ptr<void, ResourceDeleter> m_vertexShaderDecl;
 		ConvolutionParams m_convolutionParams;

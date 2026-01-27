@@ -94,6 +94,7 @@ namespace D3dDdi
 		, m_nullRt(device.getRepo())
 		, m_paletteResolvedSurface(device.getRepo())
 		, m_colorKeyedSurface(device.getRepo())
+		, m_stencilResolvedSurface(device.getRepo())
 		, m_colorKey(0)
 		, m_formatConfig(D3DDDIFMT_UNKNOWN)
 		, m_multiSampleConfig{ D3DDDIMULTISAMPLE_NONE, 0 }
@@ -1586,25 +1587,26 @@ namespace D3dDdi
 					{
 						src.resource->copySubResourceRegion(0, r, srcResource, data.SrcSubResourceIndex, data.SrcRect);
 						m_device.getShaderBlitter().depthWrite(dstResource, data.DstSubResourceIndex, data.DstRect,
-							*src.resource, 0, r);
+							*src.resource, 0, r, m_stencilResolvedSurface.resource);
 					}
 				}
 				else if (srcResource.m_fixedData.Flags.ZBuffer)
 				{
 					m_device.getShaderBlitter().depthCopy(dstResource, data.DstSubResourceIndex, data.DstRect,
-						srcResource, data.SrcSubResourceIndex, data.SrcRect);
+						srcResource, data.SrcSubResourceIndex, data.SrcRect,
+						origSrcResource.m_stencilResolvedSurface.resource);
 				}
 				else
 				{
 					m_device.getShaderBlitter().depthWrite(dstResource, data.DstSubResourceIndex, data.DstRect,
-						srcResource, data.SrcSubResourceIndex, data.SrcRect);
+						srcResource, data.SrcSubResourceIndex, data.SrcRect, m_stencilResolvedSurface.resource);
 				}
 				return S_OK;
 			}
 			else if (srcResource.m_fixedData.Flags.Texture)
 			{
 				m_device.getShaderBlitter().depthRead(dstResource, data.DstSubResourceIndex, data.DstRect,
-					srcResource, data.SrcSubResourceIndex, data.SrcRect);
+					srcResource, data.SrcSubResourceIndex, data.SrcRect, m_stencilResolvedSurface.resource);
 				return S_OK;
 			}
 			return E_NOTIMPL;
@@ -1806,6 +1808,7 @@ namespace D3dDdi
 		m_msaaSurface.reset();
 		m_msaaResolvedSurface.reset();
 		m_lockRefSurface.reset();
+		m_stencilResolvedSurface.reset();
 
 		const bool isScaled = static_cast<LONG>(m_fixedData.pSurfList[0].Width) != m_scaledSize.cx ||
 			static_cast<LONG>(m_fixedData.pSurfList[0].Height) != m_scaledSize.cy;
@@ -1846,6 +1849,13 @@ namespace D3dDdi
 					loadSysMemResource(0);
 					m_lockData[0] = lockData;
 				}
+			}
+
+			if (m_msaaResolvedSurface.resource && m_origData.Flags.ZBuffer &&
+				0 != getFormatInfo(m_origData.Format).stencil.bitCount)
+			{
+				repo.getSurface(m_stencilResolvedSurface, scaledSize.cx, scaledSize.cy, D3DDDIFMT_A8,
+					DDSCAPS_3DDEVICE | DDSCAPS_TEXTURE | DDSCAPS_VIDEOMEMORY, m_fixedData.SurfCount);
 			}
 		}
 	}
