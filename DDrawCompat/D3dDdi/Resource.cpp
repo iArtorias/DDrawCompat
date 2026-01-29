@@ -723,7 +723,7 @@ namespace D3dDdi
 			D3DDDIPOOL_SYSTEMMEM != m_fixedData.Pool &&
 			(m_origData.Flags.RenderTarget || m_origData.Flags.ZBuffer))
 		{
-			const auto& formatOps = m_device.getAdapter().getInfo().fixedFormatOps;
+			const auto& formatOps = m_device.getAdapter().getInfo().formatOps;
 			auto it = formatOps.find(m_fixedData.Format);
 			if (it != formatOps.end() && (it->second.Operations & FORMATOP_TEXTURE))
 			{

@@ -41,6 +41,16 @@ namespace
 		D3DDDIFMT_X4R4G4B4
 	};
 
+	void addFixedFormatOp(std::map<D3DDDIFORMAT, FORMATOP>& fixedFormatOps,
+		D3DDDIFORMAT format, FORMATOP formatOp)
+	{
+		auto pair = fixedFormatOps.insert({ format, formatOp });
+		if (pair.second)
+		{
+			pair.first->second.Format = format;
+		}
+	}
+
 	long long getPrio(D3DDDIFORMAT fmt)
 	{
 		auto it = std::find(g_formatPrio.begin(), g_formatPrio.end(), fmt);
@@ -209,11 +219,25 @@ namespace D3dDdi
 				fixedFormatOps[D3DDDIFMT_P8] = p8FormatOp;
 				break;
 			}
+
+			case D3DDDIFMT_S8D24:
+			case D3DDDIFMT_D24S8:
+				addFixedFormatOp(fixedFormatOps, D3DDDIFMT_S8D24, fixedFormatOp);
+				addFixedFormatOp(fixedFormatOps, D3DDDIFMT_D24S8, fixedFormatOp);
+				break;
+
+			case D3DDDIFMT_X8D24:
+			case D3DDDIFMT_D24X8:
+				addFixedFormatOp(fixedFormatOps, D3DDDIFMT_X8D24, fixedFormatOp);
+				addFixedFormatOp(fixedFormatOps, D3DDDIFMT_D24X8, fixedFormatOp);
+				break;
+
 			case D3DDDIFMT_D24X4S4:
 			case D3DDDIFMT_X4S4D24:
 			case D3DDDIFMT_D15S1:
 			case D3DDDIFMT_S1D15:
 				continue;
+
 			default:
 				if (isEmulatedRenderTargetFormat(formatOp.first, info.formatOps))
 				{
