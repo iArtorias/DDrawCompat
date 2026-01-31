@@ -8,11 +8,9 @@
 #include <D3dDdi/ScopedCriticalSection.h>
 #include <DDraw/DirectDraw.h>
 #include <DDraw/DirectDrawSurface.h>
-#include <DDraw/LogUsedResourceFormat.h>
 #include <DDraw/RealPrimarySurface.h>
 #include <DDraw/ScopedThreadLock.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
-#include <Gdi/Gdi.h>
 #include <Gdi/VirtualScreen.h>
 #include <Gdi/Window.h>
 #include <Win32/DisplayMode.h>
@@ -291,44 +289,41 @@ namespace Gdi
 				g_pitch = (g_width * g_bpp / 8 + 3) & ~3;
 				const DWORD size = (g_height + Config::surfacePatches.getExtraRows(g_height)) * g_pitch + DDraw::Surface::ALIGNMENT;
 
+				if (g_surfaceFileMapping)
+				{
+					for (auto& dc : g_dcs)
+					{
+						CALL_ORIG_FUNC(DeleteObject)(SelectObject(dc.first, g_stockBitmap));
+					}
+					if (g_surfaceFileMapping != g_lastFullscreenSurfaceFileMapping)
+					{
+						UnmapViewOfFile(g_surfaceView);
+						CloseHandle(g_surfaceFileMapping);
+					}
+					g_surfaceFileMapping = nullptr;
+					g_surfaceView = nullptr;
+				}
+
 				if (g_isFullscreen && size == g_lastFullscreenSurfaceSize)
 				{
 					g_surfaceFileMapping = g_lastFullscreenSurfaceFileMapping;
 					g_surfaceView = g_lastFullscreenSurfaceView;
 				}
-				else
+				else if (g_isFullscreen || Config::gdiInterops.anyRedirects())
 				{
-					if (g_surfaceFileMapping)
-					{
-						for (auto& dc : g_dcs)
-						{
-							CALL_ORIG_FUNC(DeleteObject)(SelectObject(dc.first, g_stockBitmap));
-						}
-						if (g_surfaceFileMapping != g_lastFullscreenSurfaceFileMapping)
-						{
-							UnmapViewOfFile(g_surfaceView);
-							CloseHandle(g_surfaceFileMapping);
-						}
-						g_surfaceFileMapping = nullptr;
-						g_surfaceView = nullptr;
-					}
+					g_surfaceFileMapping = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, size, nullptr);
+					g_surfaceView = MapViewOfFile(g_surfaceFileMapping, FILE_MAP_WRITE, 0, 0, 0);
 
-					if (g_isFullscreen || Config::gdiInterops.anyRedirects())
+					if (g_isFullscreen)
 					{
-						g_surfaceFileMapping = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, size, nullptr);
-						g_surfaceView = MapViewOfFile(g_surfaceFileMapping, FILE_MAP_WRITE, 0, 0, 0);
-
-						if (g_isFullscreen)
+						if (g_lastFullscreenSurfaceFileMapping)
 						{
-							if (g_lastFullscreenSurfaceFileMapping)
-							{
-								UnmapViewOfFile(g_lastFullscreenSurfaceView);
-								CloseHandle(g_lastFullscreenSurfaceFileMapping);
-							}
-							g_lastFullscreenSurfaceFileMapping = g_surfaceFileMapping;
-							g_lastFullscreenSurfaceView = g_surfaceView;
-							g_lastFullscreenSurfaceSize = size;
+							UnmapViewOfFile(g_lastFullscreenSurfaceView);
+							CloseHandle(g_lastFullscreenSurfaceFileMapping);
 						}
+						g_lastFullscreenSurfaceFileMapping = g_surfaceFileMapping;
+						g_lastFullscreenSurfaceView = g_surfaceView;
+						g_lastFullscreenSurfaceSize = size;
 					}
 				}
 
@@ -342,7 +337,7 @@ namespace Gdi
 					SelectObject(dc.first, createDib(dc.second.useDefaultPalette));
 				}
 
-				if (gdiResource && DDraw::PrimarySurface::getPrimary() && !DDraw::RealPrimarySurface::isLost())
+				if (gdiResource)
 				{
 					D3dDdi::Device::setGdiResourceHandle(*gdiResource);
 				}

@@ -7,7 +7,6 @@
 #include <Config/Settings/ColorKeyMethod.h>
 #include <Config/Settings/CompatFixes.h>
 #include <Config/Settings/DepthFormat.h>
-#include <Config/Settings/GdiInterops.h>
 #include <Config/Settings/ResolutionScaleFilter.h>
 #include <Config/Settings/SurfacePatches.h>
 #include <D3dDdi/Adapter.h>
@@ -148,6 +147,12 @@ namespace D3dDdi
 		else
 		{
 			createLockResource();
+			for (auto& lockData : m_lockData)
+			{
+				lockData.isSysMemUpToDate = true;
+				lockData.isVidMemUpToDate = true;
+				lockData.qpcLastCpuAccess = Time::queryPerformanceCounter();
+			}
 		}
 
 		if (isPalettizedTexture())
@@ -170,13 +175,14 @@ namespace D3dDdi
 		data.hResource = m_fixedData.hResource;
 		updateConfig();
 
-		if (m_origData.Flags.ZBuffer)
+		if (m_lockResource)
 		{
-			for (UINT i = 0; i < m_lockData.size(); ++i)
+			for (auto& lockData : m_lockData)
 			{
-				clearUpToDateFlags(i);
-				m_lockData[i].isMsaaResolvedUpToDate = true;
-				m_lockData[i].isMsaaUpToDate = m_msaaSurface.resource;
+				lockData.isSysMemUpToDate = !m_origData.Flags.ZBuffer;
+				lockData.isVidMemUpToDate = !m_origData.Flags.ZBuffer;
+				lockData.isMsaaResolvedUpToDate = m_msaaResolvedSurface.resource;
+				lockData.isMsaaUpToDate = m_msaaSurface.resource;
 			}
 		}
 	}
@@ -540,7 +546,6 @@ namespace D3dDdi
 		surfaceInfo.pSysMem = gdiSurfaceDesc.lpSurface;
 		surfaceInfo.SysMemPitch = gdiSurfaceDesc.lPitch;
 
-		m_lockData.resize(m_fixedData.SurfCount);
 		createSysMemResource({ surfaceInfo });
 		if (!m_lockResource)
 		{
@@ -627,12 +632,6 @@ namespace D3dDdi
 			{
 				m_lockData[i].data = const_cast<void*>(surfaceInfo[i].pSysMem);
 				m_lockData[i].pitch = surfaceInfo[i].SysMemPitch;
-				m_lockData[i].isSysMemUpToDate = true;
-				m_lockData[i].isVidMemUpToDate = true;
-				m_lockData[i].isMsaaUpToDate = m_msaaSurface.resource;
-				m_lockData[i].isMsaaResolvedUpToDate = m_msaaResolvedSurface.resource;
-				m_lockData[i].isRefLocked = false;
-				m_lockData[i].qpcLastCpuAccess = Time::queryPerformanceCounter();
 			}
 		}
 
@@ -1024,7 +1023,7 @@ namespace D3dDdi
 			blt.hDstResource = *this;
 			blt.DstSubResourceIndex = subResourceIndex;
 			blt.DstRect = getRect(subResourceIndex);
-			shaderBlt(blt, *this, *m_msaaResolvedSurface.resource, *this,
+			shaderBlt(blt, *this, *m_msaaResolvedSurface.resource, *m_msaaResolvedSurface.resource,
 				Config::Settings::ResolutionScaleFilter::BILINEAR == Config::resolutionScaleFilter.get()
 				? D3DTEXF_LINEAR | D3DTEXF_SRGB
 				: D3DTEXF_POINT);
@@ -1504,43 +1503,29 @@ namespace D3dDdi
 
 	void Resource::setAsGdiResource(bool isGdiResource)
 	{
-		DDSURFACEDESC2 gdiSurfaceDesc = {};
-		if (isGdiResource)
-		{
-			gdiSurfaceDesc = Gdi::VirtualScreen::getSurfaceDesc(DDraw::PrimarySurface::getMonitorInfo().rcEmulated);
-			if (!gdiSurfaceDesc.lpSurface)
-			{
-				return;
-			}
-		}
-
 		m_device.flushPrimitives();
 
-		const auto lockData = m_lockData;
-		if (m_lockResource && m_lockData[0].isSysMemUpToDate)
+		const auto desc = Gdi::VirtualScreen::getSurfaceDesc(DDraw::PrimarySurface::getMonitorInfo().rcEmulated);
+		if (!isGdiResource || !desc.lpSurface || m_formatInfo.bitsPerPixel != desc.ddpfPixelFormat.dwRGBBitCount)
 		{
-			loadVidMemResource(0);
+			if (m_lockResource && m_lockData[0].isSysMemUpToDate)
+			{
+				loadVidMemResource(0);
+				m_lockData[0].isSysMemUpToDate = false;
+			}
+			m_lockResource.reset();
+			m_lockBuffer.reset();
+			createLockResource();
+			return;
 		}
 
 		m_lockResource.reset();
-		m_lockData.clear();
 		m_lockBuffer.reset();
-		if (isGdiResource)
+		createGdiLockResource(desc);
+		if (m_lockResource)
 		{
-			createGdiLockResource(gdiSurfaceDesc);
-		}
-		else
-		{
-			createLockResource();
-		}
-
-		if (m_lockResource && !lockData.empty())
-		{
-			m_lockData[0].isMsaaUpToDate = lockData[0].isMsaaUpToDate;
-			m_lockData[0].isMsaaResolvedUpToDate = lockData[0].isMsaaResolvedUpToDate;
-			m_lockData[0].isVidMemUpToDate = lockData[0].isVidMemUpToDate;
-			m_lockData[0].isSysMemUpToDate = false;
-			m_lockData[0].isRefLocked = lockData[0].isRefLocked;
+			clearUpToDateFlags(0);
+			m_lockData[0].isSysMemUpToDate = true;
 		}
 	}
 
@@ -1856,8 +1841,9 @@ namespace D3dDdi
 				{
 					auto lockData = m_lockData[0];
 					loadMsaaResolvedResource(0);
-					m_lockData[0].isVidMemUpToDate = false;
-					loadVidMemResource(0);
+					clearUpToDateFlags(0);
+					m_lockData[0].isMsaaResolvedUpToDate = true;
+					loadSysMemResource(0);
 					m_lockData[0] = lockData;
 				}
 			}

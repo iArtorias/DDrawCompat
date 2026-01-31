@@ -151,12 +151,6 @@ namespace
 			D3dDdi::KernelModeThunks::waitForPresentEnd();
 		}
 
-		auto gdiResource = DDraw::PrimarySurface::getGdiResource();
-		if (gdiResource)
-		{
-			D3dDdi::Device::setGdiResourceHandle(gdiResource);
-		}
-
 		updatePresentationParams();
 	}
 
