@@ -345,7 +345,7 @@ namespace DDraw
 	template <typename TSurface>
 	void SurfaceImpl<TSurface>::restoreOrigCaps(DWORD& caps)
 	{
-		caps |= m_data->m_origCaps & (DDSCAPS_3DDEVICE | DDSCAPS_MIPMAP | DDSCAPS_COMPLEX);
+		caps |= m_data->m_origCaps & DDSCAPS_3DDEVICE;
 	}
 
 	template SurfaceImpl<IDirectDrawSurface>;

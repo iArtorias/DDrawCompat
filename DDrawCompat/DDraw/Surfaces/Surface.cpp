@@ -108,12 +108,6 @@ namespace DDraw
 			desc.ddsCaps.dwCaps &= ~DDSCAPS_3DDEVICE;
 		}
 
-		if ((desc.dwFlags & DDSD_MIPMAPCOUNT) && 1 == desc.dwMipMapCount)
-		{
-			desc.dwFlags &= ~DDSD_MIPMAPCOUNT;
-			desc.ddsCaps.dwCaps &= ~(DDSCAPS_COMPLEX | DDSCAPS_MIPMAP);
-		}
-
 		if (Config::compatFixes.get().forcevidmem &&
 			(desc.dwFlags & DDSD_HEIGHT) &&
 			!D3dDdi::SurfaceRepository::inCreateSurface() &&
