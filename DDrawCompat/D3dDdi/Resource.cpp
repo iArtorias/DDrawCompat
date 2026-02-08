@@ -88,6 +88,7 @@ namespace D3dDdi
 		, m_formatOp{}
 		, m_lockBuffer(nullptr, &heapFree)
 		, m_lockResource(nullptr, ResourceDeleter(device, device.getOrigVtable().pfnDestroyResource))
+		, m_gdiRect{}
 		, m_lockRefSurface(device.getRepo())
 		, m_msaaSurface(device.getRepo())
 		, m_msaaResolvedSurface(device.getRepo())
@@ -105,6 +106,7 @@ namespace D3dDdi
 		, m_isClampable(true)
 		, m_isEnhancementNeeded(D3DDDIPOOL_SYSTEMMEM != m_origData.Pool &&
 			(m_origData.Flags.RenderTarget || m_origData.Flags.ZBuffer))
+		, m_useFullGdiSurface(true)
 	{
 		if (m_origData.Flags.VertexBuffer &&
 			m_origData.Flags.MightDrawFromLocked &&
@@ -529,29 +531,12 @@ namespace D3dDdi
 		data.SrcRect = srcRect;
 		data.Flags.Point = 1;
 
-		HRESULT result = LOG_RESULT(m_device.getOrigVtable().pfnBlt(m_device, &data));
-		if (FAILED(result))
+		HRESULT result = m_device.getOrigVtable().pfnBlt(m_device, &data);
+		if (FAILED(result) && (dst != m_lockResource.get() || 0 == m_gdiRect.right))
 		{
 			LOG_ONCE("ERROR: Resource::copySubResourceRegion failed: " << Compat::hex(result));
 		}
-		return result;
-	}
-
-	void Resource::createGdiLockResource(const DDSURFACEDESC2& gdiSurfaceDesc)
-	{
-		LOG_FUNC("Resource::createGdiLockResource", gdiSurfaceDesc);
-
-		D3DDDI_SURFACEINFO surfaceInfo = {};
-		surfaceInfo.Width = gdiSurfaceDesc.dwWidth;
-		surfaceInfo.Height = gdiSurfaceDesc.dwHeight;
-		surfaceInfo.pSysMem = gdiSurfaceDesc.lpSurface;
-		surfaceInfo.SysMemPitch = gdiSurfaceDesc.lPitch;
-
-		createSysMemResource({ surfaceInfo });
-		if (!m_lockResource)
-		{
-			m_lockData.clear();
-		}
+		return LOG_RESULT(result);
 	}
 
 	void Resource::createLockResource()
@@ -621,6 +606,7 @@ namespace D3dDdi
 		data.SurfCount = surfaceInfo.size();
 		data.Rotation = D3DDDI_ROTATION_IDENTITY;
 		data.MipLevels = m_fixedData.MipLevels;
+		data.hResource = m_origData.hResource;
 		data.Flags.Texture = m_fixedData.Flags.Texture;
 		data.Flags.CubeMap = m_fixedData.Flags.CubeMap;
 
@@ -999,7 +985,18 @@ namespace D3dDdi
 		if (!m_lockData[subResourceIndex].isSysMemUpToDate)
 		{
 			loadVidMemResource(subResourceIndex);
-			copySubResource(m_lockResource.get(), *this, subResourceIndex);
+			const RECT rect = getRect(subResourceIndex);
+			const auto result = copySubResourceRegion(m_lockResource.get(), subResourceIndex,
+				0 != m_gdiRect.right ? m_gdiRect : rect, *this, subResourceIndex, rect);
+			if (FAILED(result) && 0 != m_gdiRect.right)
+			{
+				m_useFullGdiSurface = false;
+				setAsGdiResource(true);
+				if (m_lockResource)
+				{
+					copySubResourceRegion(m_lockResource.get(), subResourceIndex, rect, *this, subResourceIndex, rect);
+				}
+			}
 			notifyLock(subResourceIndex);
 			m_lockData[subResourceIndex].isSysMemUpToDate = true;
 		}
@@ -1031,7 +1028,9 @@ namespace D3dDdi
 		}
 		else
 		{
-			copySubResource(*this, m_lockResource.get(), subResourceIndex);
+			const RECT rect = getRect(subResourceIndex);
+			copySubResourceRegion(subResourceIndex, rect, m_lockResource.get(), subResourceIndex,
+				0 != m_gdiRect.right ? m_gdiRect : rect);
 			notifyLock(subResourceIndex);
 		}
 		m_lockData[subResourceIndex].isVidMemUpToDate = true;
@@ -1504,9 +1503,13 @@ namespace D3dDdi
 
 	void Resource::setAsGdiResource(bool isGdiResource)
 	{
+		LOG_FUNC("Resource::setAsGdiResource", isGdiResource);
 		m_device.flushPrimitives();
+		m_gdiRect = {};
 
-		const auto desc = Gdi::VirtualScreen::getSurfaceDesc(DDraw::PrimarySurface::getMonitorInfo().rcEmulated);
+		const auto bounds = Gdi::VirtualScreen::getBounds();
+		const auto primaryRect = DDraw::PrimarySurface::getMonitorInfo().rcEmulated;
+		const auto desc = Gdi::VirtualScreen::getSurfaceDesc(m_useFullGdiSurface ? bounds : primaryRect);
 		if (!isGdiResource || !desc.lpSurface || m_formatInfo.bitsPerPixel != desc.ddpfPixelFormat.dwRGBBitCount)
 		{
 			if (m_lockResource && m_lockData[0].isSysMemUpToDate)
@@ -1522,11 +1525,34 @@ namespace D3dDdi
 
 		m_lockResource.reset();
 		m_lockBuffer.reset();
-		createGdiLockResource(desc);
+
+		D3DDDI_SURFACEINFO surfaceInfo = {};
+		surfaceInfo.Width = desc.dwWidth;
+		surfaceInfo.Height = desc.dwHeight;
+		surfaceInfo.pSysMem = desc.lpSurface;
+		surfaceInfo.SysMemPitch = desc.lPitch;
+		createSysMemResource({ surfaceInfo });
+
 		if (m_lockResource)
 		{
 			clearUpToDateFlags(0);
 			m_lockData[0].isSysMemUpToDate = true;
+			if (m_useFullGdiSurface)
+			{
+				m_gdiRect = primaryRect;
+				OffsetRect(&m_gdiRect, -bounds.left, -bounds.top);
+				m_lockData[0].data = static_cast<BYTE*>(m_lockData[0].data) +
+					m_gdiRect.top * desc.lPitch + m_gdiRect.left * m_formatInfo.bytesPerPixel;
+			}
+		}
+		else if (m_useFullGdiSurface)
+		{
+			m_useFullGdiSurface = false;
+			setAsGdiResource(true);
+		}
+		else
+		{
+			setAsGdiResource(false);
 		}
 	}
 

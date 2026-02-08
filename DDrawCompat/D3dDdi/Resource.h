@@ -112,7 +112,6 @@ namespace D3dDdi
 		HRESULT copySubResource(HANDLE dstResource, HANDLE srcResource, UINT subResourceIndex);
 		HRESULT copySubResourceRegion(HANDLE dst, UINT dstIndex, const RECT& dstRect,
 			HANDLE src, UINT srcIndex, const RECT& srcRect);
-		void createGdiLockResource(const DDSURFACEDESC2& gdiSurfaceDesc);
 		void createLockResource();
 		void createSysMemResource(const std::vector<D3DDDI_SURFACEINFO>& surfaceInfo);
 		void fixResourceData();
@@ -143,6 +142,7 @@ namespace D3dDdi
 		std::unique_ptr<void, void(*)(void*)> m_lockBuffer;
 		std::vector<LockData> m_lockData;
 		std::unique_ptr<void, ResourceDeleter> m_lockResource;
+		RECT m_gdiRect;
 		SurfaceRepository::ScopedSurface m_lockRefSurface;
 		SurfaceRepository::ScopedSurface m_msaaSurface;
 		SurfaceRepository::ScopedSurface m_msaaResolvedSurface;
@@ -161,5 +161,6 @@ namespace D3dDdi
 		bool m_isSurfaceRepoResource;
 		bool m_isClampable;
 		bool m_isEnhancementNeeded;
+		bool m_useFullGdiSurface;
 	};
 }
