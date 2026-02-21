@@ -240,6 +240,11 @@ namespace DDraw
 			return DDERR_NOEXCLUSIVEMODE;
 		}
 
+		if (FAILED(getOrigVtable(This).IsLost(This)))
+		{
+			return DDERR_SURFACELOST;
+		}
+
 		RealPrimarySurface::setUpdateReady();
 		RealPrimarySurface::flush();
 		RealPrimarySurface::waitForFlip(this->m_data->getDDS());
@@ -251,17 +256,18 @@ namespace DDraw
 		}
 
 		auto surfaceTargetOverride(CompatPtr<TSurface>::from(lpDDSurfaceTargetOverride));
+		auto surface(surfaceTargetOverride);
+		if (!surface)
+		{
+			TDdsCaps caps = {};
+			caps.dwCaps = DDSCAPS_BACKBUFFER;
+			getOrigVtable(This).GetAttachedSurface(This, &caps, &surface.getRef());
+		}
+
 		const bool isFlipEmulated = 0 != (PrimarySurface::getOrigCaps() & DDSCAPS_SYSTEMMEMORY);
 		if (isFlipEmulated)
 		{
-			if (!surfaceTargetOverride)
-			{
-				TDdsCaps caps = {};
-				caps.dwCaps = DDSCAPS_BACKBUFFER;
-				getOrigVtable(This).GetAttachedSurface(This, &caps, &surfaceTargetOverride.getRef());
-			}
-
-			HRESULT result = SurfaceImpl<TSurface>::Blt(This, nullptr, surfaceTargetOverride.get(), nullptr, DDBLT_WAIT, nullptr);
+			HRESULT result = SurfaceImpl<TSurface>::Blt(This, nullptr, surface.get(), nullptr, DDBLT_WAIT, nullptr);
 			if (FAILED(result))
 			{
 				return result;
@@ -271,6 +277,12 @@ namespace DDraw
 		}
 		else
 		{
+			if (surface)
+			{
+				RECT emptyRect = {};
+				getOrigVtable(surface.get()).BltFast(surface, 0, 0, surface, &emptyRect, DDBLTFAST_WAIT);
+			}
+
 			HRESULT result = SurfaceImpl<TSurface>::Flip(This, surfaceTargetOverride, DDFLIP_WAIT);
 			if (FAILED(result))
 			{
