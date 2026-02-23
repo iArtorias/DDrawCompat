@@ -684,12 +684,23 @@ namespace D3dDdi
 	bool DrawPrimitive::isSprite(INT baseVertexIndex, UINT count, const UINT16* indices)
 	{
 		auto spriteDetection = Config::spriteDetection.get();
-		if (Config::Settings::SpriteDetection::OFF == spriteDetection ||
-			Config::Settings::SpriteDetection::POINT == spriteDetection && (
-				D3DTEXF_POINT != m_device.getState().getAppState().textureStageState[0][D3DDDITSS_MAGFILTER] ||
-				D3DTEXF_POINT != m_device.getState().getAppState().textureStageState[0][D3DDDITSS_MINFILTER]))
+		if (Config::Settings::SpriteDetection::OFF == spriteDetection)
 		{
 			return false;
+		}
+
+		if (Config::Settings::SpriteDetection::POINT == spriteDetection)
+		{
+			const auto& appState = m_device.getState().getAppState();
+			if (D3DTEXF_POINT != appState.textureStageState[0][D3DDDITSS_MAGFILTER] ||
+				D3DTEXF_POINT != appState.textureStageState[0][D3DDDITSS_MINFILTER])
+			{
+				return false;
+			}
+			if (0 == Config::spriteDetection.getParam())
+			{
+				return true;
+			}
 		}
 
 		auto v = m_streamSource.vertices + baseVertexIndex * m_streamSource.stride;

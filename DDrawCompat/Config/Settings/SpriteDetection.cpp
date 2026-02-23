@@ -15,6 +15,10 @@ namespace Config
 			{
 				return { "ZMax", 0, 100, 0 };
 			}
+			if (POINT == m_value)
+			{
+				return { "ZConst", 0, 1, 1 };
+			}
 			return {};
 		}
 	}
