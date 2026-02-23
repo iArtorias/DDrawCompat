@@ -160,8 +160,27 @@ namespace D3dDdi
 		{
 			m_cursor = cursor;
 
-			std::unique_ptr<HICON__, decltype(&DestroyCursor)> resizedCursor(reinterpret_cast<HCURSOR>(
-				CopyImage(cursor, IMAGE_CURSOR, 32, 32, LR_COPYRETURNORG | LR_COPYFROMRESOURCE)), DestroyCursor);
+			std::unique_ptr<HICON__, decltype(&DestroyCursor)> resizedCursor(nullptr, DestroyCursor);
+			ICONINFO iconInfo = {};
+			if (GetIconInfo(cursor, &iconInfo))
+			{
+				std::unique_ptr<void, decltype(&DeleteObject)> bmColor(iconInfo.hbmColor, CALL_ORIG_FUNC(DeleteObject));
+				std::unique_ptr<void, decltype(&DeleteObject)> bmMask(iconInfo.hbmMask, CALL_ORIG_FUNC(DeleteObject));
+
+				BITMAP bm = {};
+				GetObject(iconInfo.hbmMask, sizeof(bm), &bm);
+				if (!iconInfo.hbmColor)
+				{
+					bm.bmHeight /= 2;
+				}
+
+				if (bm.bmWidth > 32 || bm.bmHeight > 32)
+				{
+					resizedCursor.reset(reinterpret_cast<HCURSOR>(
+						CopyImage(cursor, IMAGE_CURSOR, 32, 32, LR_COPYRETURNORG | LR_COPYFROMRESOURCE)));
+				}
+			}
+
 			if (resizedCursor)
 			{
 				if (resizedCursor.get() == cursor)
@@ -174,7 +193,7 @@ namespace D3dDdi
 				}
 			}
 
-			ICONINFO iconInfo = {};
+			iconInfo = {};
 			if (!GetIconInfo(cursor, &iconInfo))
 			{
 				return {};
