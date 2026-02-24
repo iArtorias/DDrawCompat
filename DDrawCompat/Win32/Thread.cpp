@@ -252,10 +252,12 @@ namespace
 
 	void registerThread(DWORD threadId, const char* msg)
 	{
-		Compat::ScopedCriticalSection lock(g_cs);
-		if (g_threads.find(threadId) != g_threads.end())
 		{
-			return;
+			Compat::ScopedCriticalSection lock(g_cs);
+			if (g_threads.find(threadId) != g_threads.end())
+			{
+				return;
+			}
 		}
 
 		ThreadInfo threadInfo = {};
@@ -275,7 +277,15 @@ namespace
 		}
 
 		threadInfo.useCpuAffinity = useCpuAffinityForThread(threadInfo.startAddress);
-		g_threads[threadId] = threadInfo;
+
+		{
+			Compat::ScopedCriticalSection lock(g_cs);
+			if (!g_threads.insert({ threadId, threadInfo }).second)
+			{
+				return;
+			}
+		}
+
 		logThreadInfo(threadInfo, msg);
 
 		if (threadInfo.useCpuAffinity)
