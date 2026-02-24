@@ -137,6 +137,7 @@ namespace
 	template <typename Char>
 	std::vector<DisplayMode> getSupportedDisplayModes(const Char* deviceName, DWORD flags);
 
+	bool isDisplayOrMemDc(HDC dc);
 	SIZE makeSize(DWORD width, DWORD height);
 
 	template <typename Char>
@@ -564,14 +565,14 @@ namespace
 		switch (nIndex)
 		{
 		case BITSPIXEL:
-			if (Config::gdiInterops.get().colors && Gdi::isDisplayDc(hdc))
+			if (Config::gdiInterops.get().colors && isDisplayOrMemDc(hdc))
 			{
 				return LOG_RESULT(Win32::DisplayMode::getBpp());
 			}
 			break;
 
 		case COLORRES:
-			if (Config::gdiInterops.get().colors && 8 == Win32::DisplayMode::getBpp() && Gdi::isDisplayDc(hdc))
+			if (Config::gdiInterops.get().colors && 8 == Win32::DisplayMode::getBpp() && isDisplayOrMemDc(hdc))
 			{
 				return LOG_RESULT(24);
 			}
@@ -588,21 +589,21 @@ namespace
 
 		case NUMCOLORS:
 		case NUMRESERVED:
-			if (Config::gdiInterops.get().colors && 8 == Win32::DisplayMode::getBpp() && Gdi::isDisplayDc(hdc))
+			if (Config::gdiInterops.get().colors && 8 == Win32::DisplayMode::getBpp() && isDisplayOrMemDc(hdc))
 			{
 				return LOG_RESULT(20);
 			}
 			break;
 
 		case RASTERCAPS:
-			if (Config::gdiInterops.get().colors && 8 == Win32::DisplayMode::getBpp() && Gdi::isDisplayDc(hdc))
+			if (Config::gdiInterops.get().colors && 8 == Win32::DisplayMode::getBpp() && isDisplayOrMemDc(hdc))
 			{
 				return LOG_RESULT(CALL_ORIG_FUNC(GetDeviceCaps)(hdc, nIndex) | RC_PALETTE);
 			}
 			break;
 
 		case SIZEPALETTE:
-			if (Config::gdiInterops.get().colors && 8 == Win32::DisplayMode::getBpp() && Gdi::isDisplayDc(hdc))
+			if (Config::gdiInterops.get().colors && 8 == Win32::DisplayMode::getBpp() && isDisplayOrMemDc(hdc))
 			{
 				return LOG_RESULT(256);
 			}
@@ -807,6 +808,17 @@ namespace
 		}
 
 		return TRUE;
+	}
+
+	bool isDisplayOrMemDc(HDC dc)
+	{
+		if (!dc || DT_RASDISPLAY != CALL_ORIG_FUNC(GetDeviceCaps)(dc, TECHNOLOGY))
+		{
+			return false;
+		}
+
+		const auto type = GetObjectType(dc);
+		return OBJ_DC == type || OBJ_MEMDC == type;
 	}
 
 	SIZE makeSize(DWORD width, DWORD height)
