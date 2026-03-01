@@ -430,6 +430,25 @@ namespace
 		return CallNextHookEx(nullptr, nCode, wParam, lParam);
 	}
 
+	void WINAPI mouseEvent(DWORD dwFlags, DWORD dx, DWORD dy, DWORD dwData, ULONG_PTR dwExtraInfo)
+	{
+		LOG_FUNC("mouse_event", Compat::hex(dwFlags), dx, dy, dwData, dwExtraInfo);
+		if ((dwFlags & MOUSEEVENTF_MOVE) && (dwFlags & MOUSEEVENTF_ABSOLUTE))
+		{
+			const auto emulatedDm = Win32::DisplayMode::getEmulatedDisplayMode();
+			if (!emulatedDm.deviceName.empty())
+			{
+				const auto mi = Win32::DisplayMode::getMonitorInfo(emulatedDm.deviceName);
+				if (0 == mi.rcReal.left && 0 == mi.rcReal.top && 0 != mi.rcReal.right && 0 != mi.rcReal.bottom)
+				{
+					dx = dx * emulatedDm.width / mi.rcReal.right;
+					dy = dy * emulatedDm.height / mi.rcReal.bottom;
+				}
+			}
+		}
+		return CALL_ORIG_FUNC(mouse_event)(dwFlags, dx, dy, dwData, dwExtraInfo);
+	}
+
 	void CALLBACK onMousePollingRateTimer(
 		UINT /*uTimerID*/, UINT /*uMsg*/, DWORD_PTR /*dwUser*/, DWORD_PTR /*dw1*/, DWORD_PTR /*dw2*/)
 	{
@@ -766,6 +785,7 @@ namespace Input
 
 		HOOK_FUNCTION(user32, GetRawInputData, getRawInputData);
 		HOOK_FUNCTION(user32, GetRawInputBuffer, getRawInputBuffer);
+		HOOK_FUNCTION(user32, mouse_event, mouseEvent);
 		HOOK_FUNCTION(user32, RegisterRawInputDevices, registerRawInputDevices);
 		HOOK_FUNCTION(user32, SetWindowsHookExA, setWindowsHookExA);
 		HOOK_FUNCTION(user32, SetWindowsHookExW, setWindowsHookExW);
