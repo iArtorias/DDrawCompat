@@ -500,14 +500,20 @@ namespace Gdi
 
 		void executeAsyncFunc(void(*func)())
 		{
-			PostMessage(g_messageWindow, WM_USER_EXECUTE_ASYNC, 0, reinterpret_cast<LPARAM>(func));
+			if (g_messageWindow)
+			{
+				PostMessage(g_messageWindow, WM_USER_EXECUTE_ASYNC, 0, reinterpret_cast<LPARAM>(func));
+			}
 		}
 
 		void executeFunc(const std::function<void()>& func)
 		{
-			DWORD_PTR result = 0;
-			SendMessageTimeout(g_messageWindow, WM_USER_EXECUTE, 0, reinterpret_cast<LPARAM>(&func),
-				SMTO_BLOCK | SMTO_NOTIMEOUTIFNOTHUNG, 0, &result);
+			if (g_messageWindow)
+			{
+				DWORD_PTR result = 0;
+				SendMessageTimeout(g_messageWindow, WM_USER_EXECUTE, 0, reinterpret_cast<LPARAM>(&func),
+					SMTO_BLOCK | SMTO_NOTIMEOUTIFNOTHUNG, 0, &result);
+			}
 		}
 
 		Overlay::ConfigWindow* getConfigWindow()
