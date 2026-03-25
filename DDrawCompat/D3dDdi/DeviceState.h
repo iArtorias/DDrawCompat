@@ -55,6 +55,7 @@ namespace D3dDdi
 			D3DDDIARG_VIEWPORTINFO viewport;
 			D3DDDIARG_WINFO wInfo;
 			D3DDDIARG_ZRANGE zRange;
+			bool isTransformed;
 		};
 
 		struct TempShader

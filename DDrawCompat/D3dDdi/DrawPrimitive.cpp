@@ -660,7 +660,7 @@ namespace D3dDdi
 
 		if (m_batched.primitiveType < D3DPT_TRIANGLELIST &&
 			m_streamSource.vertices &&
-			m_device.getState().getVertexDecl().isTransformed &&
+			m_device.getState().getCurrentState().isTransformed &&
 			getBatchedVertexCount() * 4 <= D3DMAXNUMVERTICES)
 		{
 			if (D3DPT_POINTLIST != m_batched.primitiveType)
@@ -882,7 +882,7 @@ namespace D3dDdi
 	void DrawPrimitive::setVertexFixupFlags(INT baseVertexIndex, UINT16 index)
 	{
 		auto& state = m_device.getState();
-		if (!state.getVertexDecl().isTransformed ||
+		if (!state.getCurrentState().isTransformed ||
 			state.getCurrentState().vertexShaderFunc != state.getAppState().vertexShaderFunc)
 		{
 			return;
@@ -929,7 +929,7 @@ namespace D3dDdi
 		auto spriteMode = DeviceState::NON_SPRITE;
 		if (m_streamSource.vertices)
 		{
-			if (primitiveType < D3DPT_TRIANGLELIST)
+			if (primitiveType < D3DPT_TRIANGLELIST && state.getCurrentState().isTransformed)
 			{
 				spriteMode = DeviceState::POINT_OR_LINE;
 				state.setTempRenderState({ D3DDDIRS_FILLMODE, D3DFILL_SOLID });
@@ -938,7 +938,7 @@ namespace D3dDdi
 					state.setTempRenderState({ D3DDDIRS_CULLMODE, D3DCULL_CCW });
 				}
 			}
-			else if (isSprite(baseVertexIndex, count, indices))
+			else if (primitiveType >= D3DPT_TRIANGLELIST && isSprite(baseVertexIndex, count, indices))
 			{
 				spriteMode = DeviceState::SPRITE;
 				setTextureClampMode(baseVertexIndex, indices, count);

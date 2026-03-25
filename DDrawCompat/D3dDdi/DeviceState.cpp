@@ -727,7 +727,8 @@ namespace D3dDdi
 		const bool wasTransformed = getVertexDecl().isTransformed;
 		auto it = m_vertexShaderDecls.find(shader);
 		m_vertexDecl = it != m_vertexShaderDecls.end() ? &it->second : nullptr;
-		if (getVertexDecl().isTransformed != wasTransformed)
+		m_app.isTransformed = getVertexDecl().isTransformed;
+		if (m_app.isTransformed != wasTransformed)
 		{
 			m_changedStates |= CS_RENDER_TARGET;
 		}
@@ -1076,6 +1077,7 @@ namespace D3dDdi
 	{
 		if (setShader(decl, m_current.vertexShaderDecl, m_device.getOrigVtable().pfnSetVertexShaderDecl))
 		{
+			m_current.isTransformed = m_app.isTransformed;
 			LOG_DS << decl;
 		}
 	}
