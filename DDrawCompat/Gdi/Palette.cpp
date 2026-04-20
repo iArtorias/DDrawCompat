@@ -160,6 +160,7 @@ namespace
 				}
 			}
 
+			bool isHardwarePaletteChanged = false;
 			for (UINT i = 0; i < count && g_systemPaletteFirstUnusedIndex <= g_systemPaletteLastNonReservedIndex; ++i)
 			{
 				if ((entries[i].peFlags & PC_EXPLICIT) ||
@@ -168,13 +169,18 @@ namespace
 					continue;
 				}
 
+				if (!isHardwarePaletteChanged)
+				{
+					isHardwarePaletteChanged = !isSameColor(g_systemPalette[g_systemPaletteFirstUnusedIndex], entries[i]);
+				}
+
 				g_systemPalette[g_systemPaletteFirstUnusedIndex] = entries[i];
 				g_systemPalette[g_systemPaletteFirstUnusedIndex].peFlags = 0;
 				++g_systemPaletteFirstUnusedIndex;
 			}
 
 			paletteInfo.isRealized = true;
-			if (!DDraw::RealPrimarySurface::isFullscreen() || !DDraw::PrimarySurface::s_palette)
+			if (isHardwarePaletteChanged)
 			{
 				std::memcpy(g_hardwarePalette, g_systemPalette, sizeof(g_hardwarePalette));
 				Gdi::VirtualScreen::updatePalette(g_hardwarePalette);
