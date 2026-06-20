@@ -402,6 +402,42 @@ namespace
 		CALL_ORIG_FUNC(DeleteObject)(bmp);
 	}
 
+	BOOL filteredPeekMessage(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg,
+		decltype(&PeekMessageA) origPeekMessage, decltype(&DispatchMessageA) dispatchMessage)
+	{
+		const MSG origMsg = lpMsg ? *lpMsg : MSG{};
+		const ATOM userAdapterWindowClassAtom = Gdi::getUserAdapterWindowClassAtom();
+		BOOL result = origPeekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+		if (0 == userAdapterWindowClassAtom)
+		{
+			return result;
+		}
+
+		int count = 0;
+		while (result && lpMsg->hwnd && userAdapterWindowClassAtom == GetClassLongA(lpMsg->hwnd, GCW_ATOM))
+		{
+			if (100 == count)
+			{
+				LOG_ONCE("Warning: UserAdapterWindowClass filter reached maximum retry count");
+				return TRUE;
+			}
+
+			if (!(wRemoveMsg & PM_REMOVE) &&
+				!origPeekMessage(lpMsg, lpMsg->hwnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg | PM_REMOVE))
+			{
+				return TRUE;
+			}
+
+			TranslateMessage(lpMsg);
+			dispatchMessage(lpMsg);
+
+			*lpMsg = origMsg;
+			result = origPeekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+			++count;
+		}
+		return result;
+	}
+
 	BOOL WINAPI getCursorPos(LPPOINT lpPoint)
 	{
 		if (lpPoint && g_cursorPos)
@@ -429,10 +465,24 @@ namespace
 	}
 
 	BOOL WINAPI getMessage(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax,
-		decltype(&GetMessageA) origGetMessage)
+		decltype(&GetMessageA) origGetMessage, decltype(&DispatchMessageA) dispatchMessage)
 	{
 		DDraw::RealPrimarySurface::setUpdateReady();
+		const MSG origMsg = lpMsg ? *lpMsg : MSG{};
+		const ATOM userAdapterWindowClassAtom = Gdi::getUserAdapterWindowClassAtom();
 		BOOL result = origGetMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax);
+
+		if (0 != userAdapterWindowClassAtom)
+		{
+			while (-1 != result && lpMsg->hwnd && userAdapterWindowClassAtom == GetClassLongA(lpMsg->hwnd, GCW_ATOM))
+			{
+				TranslateMessage(lpMsg);
+				dispatchMessage(lpMsg);
+				*lpMsg = origMsg;
+				result = origGetMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax);
+			}
+		}
+
 		if (-1 != result)
 		{
 			clipMouseCoords(*lpMsg);
@@ -442,12 +492,14 @@ namespace
 
 	BOOL WINAPI getMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
 	{
-		return getMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, CALL_ORIG_FUNC(GetMessageA));
+		return getMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax,
+			CALL_ORIG_FUNC(GetMessageA), DispatchMessageA);
 	}
 
 	BOOL WINAPI getMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
 	{
-		return getMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, CALL_ORIG_FUNC(GetMessageW));
+		return getMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax,
+			CALL_ORIG_FUNC(GetMessageW), DispatchMessageW);
 	}
 
 	int WINAPI getRandomRgn(HDC hdc, HRGN hrgn, INT i)
@@ -550,7 +602,7 @@ namespace
 
 	bool isUser32ScrollBar(HWND hwnd)
 	{
-		static const ATOM sbAtom = Gdi::getClassAtom(L"ScrollBar");
+		static const ATOM sbAtom = Gdi::getClassAtom(nullptr, L"ScrollBar");
 		if (sbAtom != GetClassLong(hwnd, GCW_ATOM))
 		{
 			return false;
@@ -666,10 +718,11 @@ namespace
 	}
 
 	BOOL peekMessage(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg,
-		decltype(&PeekMessageA) origPeekMessage)
+		decltype(&PeekMessageA) origPeekMessage, decltype(&DispatchMessageA) dispatchMessage)
 	{
 		DDraw::RealPrimarySurface::setUpdateReady();
-		BOOL result = origPeekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
+		BOOL result = filteredPeekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg,
+			origPeekMessage, dispatchMessage);
 		if (result)
 		{
 			clipMouseCoords(*lpMsg);
@@ -708,7 +761,8 @@ namespace
 		while (Time::qpcToMs(g_qpcWaitEnd - qpcNow) > 0)
 		{
 			Time::waitForNextTick();
-			if (origPeekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg))
+			if (filteredPeekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg,
+				origPeekMessage, dispatchMessage))
 			{
 				return TRUE;
 			}
@@ -717,7 +771,8 @@ namespace
 
 		while (g_qpcWaitEnd - qpcNow > 0)
 		{
-			if (origPeekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg))
+			if (filteredPeekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg,
+				origPeekMessage, dispatchMessage))
 			{
 				return TRUE;
 			}
@@ -731,12 +786,14 @@ namespace
 
 	BOOL WINAPI peekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
 	{
-		return peekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg, CALL_ORIG_FUNC(PeekMessageA));
+		return peekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg,
+			CALL_ORIG_FUNC(PeekMessageA), DispatchMessageA);
 	}
 
 	BOOL WINAPI peekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
 	{
-		return peekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg, CALL_ORIG_FUNC(PeekMessageW));
+		return peekMessage(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg,
+			CALL_ORIG_FUNC(PeekMessageW), DispatchMessageW);
 	}
 
 	BOOL WINAPI setLayeredWindowAttributes(HWND hwnd, COLORREF crKey, BYTE bAlpha, DWORD dwFlags)

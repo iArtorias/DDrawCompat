@@ -11,9 +11,10 @@ namespace Gdi
 
 	void checkDesktopComposition();
 	void dllThreadDetach();
-	ATOM getClassAtom(const std::wstring& className);
+	ATOM getClassAtom(HINSTANCE hInstance, const wchar_t* className);
 	ATOM getComboLBoxAtom();
 	ATOM getSysShadowAtom();
+	ATOM getUserAdapterWindowClassAtom();
 	void installHooks();
 	bool isDisplayDc(HDC dc);
 	bool isRedirected(HWND hwnd);

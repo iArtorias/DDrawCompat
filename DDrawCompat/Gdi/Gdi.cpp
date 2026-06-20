@@ -25,13 +25,16 @@ namespace
 	ATOM g_microsoftWindowsTooltipAtom = 0;
 	ATOM g_sysShadowAtom = 0;
 	ATOM g_tooltips_class32Atom = 0;
+	ATOM g_userAdapterWindowClassAtom = 0;
 
 	const std::map<std::wstring, ATOM&> g_classAtoms = {
 		{ L"Auto-Suggest Dropdown", g_autoSuggestDropdownAtom },
 		{ L"ComboLBox", g_comboLBoxAtom },
 		{ L"MicrosoftWindowsTooltip", g_microsoftWindowsTooltipAtom },
 		{ L"SysShadow", g_sysShadowAtom },
-		{ L"tooltips_class32", g_tooltips_class32Atom }
+		{ L"SystemUserAdapterWindowClass", g_userAdapterWindowClassAtom },
+		{ L"tooltips_class32", g_tooltips_class32Atom },
+		{ L"UserAdapterWindowClass", g_userAdapterWindowClassAtom }
 	};
 
 	HRESULT WINAPI dwmEnableComposition([[maybe_unused]] UINT uCompositionAction)
@@ -87,10 +90,10 @@ namespace Gdi
 		Dc::dllThreadDetach();
 	}
 
-	ATOM getClassAtom(const std::wstring& className)
+	ATOM getClassAtom(HINSTANCE hInstance, const wchar_t* className)
 	{
 		WNDCLASSW wc = {};
-		return static_cast<ATOM>(GetClassInfoW(nullptr, className.c_str(), &wc));
+		return static_cast<ATOM>(GetClassInfoW(hInstance, className, &wc));
 	}
 
 	ATOM getComboLBoxAtom()
@@ -103,12 +106,31 @@ namespace Gdi
 		return g_sysShadowAtom;
 	}
 
+	ATOM getUserAdapterWindowClassAtom()
+	{
+		return g_userAdapterWindowClassAtom;
+	}
+
 	void installHooks()
 	{
 		LOG_INFO << "Installing GDI hooks";
 		for (const auto& atom : g_classAtoms)
 		{
-			atom.second = getClassAtom(atom.first.c_str());
+			if (0 == atom.second)
+			{
+				if (&atom.second == &g_userAdapterWindowClassAtom)
+				{
+					auto instance = GetModuleHandleA("CoreMessaging");
+					if (instance)
+					{
+						atom.second = getClassAtom(instance, atom.first.c_str());
+					}
+				}
+				else
+				{
+					atom.second = getClassAtom(nullptr, atom.first.c_str());
+				}
+			}
 		}
 
 #pragma warning (disable : 4995)
