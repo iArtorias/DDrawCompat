@@ -21,7 +21,6 @@
 #include <Overlay/ConfigWindow.h>
 #include <Overlay/StatsWindow.h>
 #include <Win32/DisplayMode.h>
-#include <Win32/DpiAwareness.h>
 
 namespace
 {
@@ -673,19 +672,16 @@ namespace Gdi
 			{
 				LOG_DEBUG << "setDpiAwareness: " << dpiAware << ' ' << hwnd;
 				it->second.isDpiAware = dpiAware;
-				if (Win32::DpiAwareness::isMixedModeSupported())
+				auto prevPresentationWindow = it->second.presentationWindow;
+				it->second.presentationWindow =
+					(it->second.isLayered && !dpiAware) ? nullptr : Gdi::PresentationWindow::create(hwnd, dpiAware);
+				if (it->second.presentationWindow)
 				{
-					auto prevPresentationWindow = it->second.presentationWindow;
-					it->second.presentationWindow =
-						(it->second.isLayered && !dpiAware) ? nullptr : Gdi::PresentationWindow::create(hwnd, dpiAware);
-					if (it->second.presentationWindow)
-					{
-						updatePresentationWindowText(it->second.presentationWindow);
-					}
-					if (dpiAware && prevPresentationWindow)
-					{
-						Gdi::GuiThread::destroyWindow(prevPresentationWindow);
-					}
+					updatePresentationWindowText(it->second.presentationWindow);
+				}
+				if (dpiAware && prevPresentationWindow)
+				{
+					Gdi::GuiThread::destroyWindow(prevPresentationWindow);
 				}
 			}
 		}
