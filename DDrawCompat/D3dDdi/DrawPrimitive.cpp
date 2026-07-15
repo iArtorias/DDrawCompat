@@ -932,11 +932,6 @@ namespace D3dDdi
 			if (primitiveType < D3DPT_TRIANGLELIST && state.getCurrentState().isTransformed)
 			{
 				spriteMode = DeviceState::POINT_OR_LINE;
-				state.setTempRenderState({ D3DDDIRS_FILLMODE, D3DFILL_SOLID });
-				if (D3DCULL_CW == state.getCurrentState().renderState[D3DDDIRS_CULLMODE])
-				{
-					state.setTempRenderState({ D3DDDIRS_CULLMODE, D3DCULL_CCW });
-				}
 			}
 			else if (primitiveType >= D3DPT_TRIANGLELIST && isSprite(baseVertexIndex, count, indices))
 			{

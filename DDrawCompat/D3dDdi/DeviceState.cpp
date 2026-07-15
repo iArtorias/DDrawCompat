@@ -399,19 +399,25 @@ namespace D3dDdi
 			return value & (D3DWRAPCOORD_0 | D3DWRAPCOORD_1 | D3DWRAPCOORD_2 | D3DWRAPCOORD_3);
 		}
 
-		if (D3DDDIRS_ALPHAREF == state)
+		switch (state)
 		{
+		case D3DDDIRS_ALPHAREF:
 			return value & 0xFF;
-		}
 
-		if (D3DDDIRS_COLORKEYENABLE == state)
-		{
+		case D3DDDIRS_COLORKEYENABLE:
 			return value && Config::Settings::ColorKeyMethod::NATIVE == Config::colorKeyMethod.get();
-		}
 
-		if (D3DDDIRS_MULTISAMPLEANTIALIAS == state)
-		{
+		case D3DDDIRS_CULLMODE:
+			return (POINT_OR_LINE == m_spriteMode && D3DCULL_CW == value) ? D3DCULL_CCW : value;
+
+		case D3DDDIRS_FILLMODE:
+			return POINT_OR_LINE == m_spriteMode ? D3DFILL_SOLID : value;
+
+		case D3DDDIRS_MULTISAMPLEANTIALIAS:
 			return 0 != value && SPRITE != m_spriteMode;
+
+		case D3DDDIRS_ZBIAS:
+			return POINT_OR_LINE == m_spriteMode ? 0 : value;
 		}
 
 		return value;
@@ -901,7 +907,10 @@ namespace D3dDdi
 			m_device.flushPrimitives();
 			m_spriteMode = spriteMode;
 			m_changedStates |= CS_RENDER_STATE | CS_RENDER_TARGET | CS_TEXTURE_STAGE;
+			m_changedRenderStates.set(D3DDDIRS_CULLMODE);
+			m_changedRenderStates.set(D3DDDIRS_FILLMODE);
 			m_changedRenderStates.set(D3DDDIRS_MULTISAMPLEANTIALIAS);
+			m_changedRenderStates.set(D3DDDIRS_ZBIAS);
 			m_changedTextureStageStates[0].set(D3DDDITSS_ADDRESSU);
 			m_changedTextureStageStates[0].set(D3DDDITSS_ADDRESSV);
 			m_changedTextureStageStates[0].set(D3DDDITSS_MAGFILTER);
