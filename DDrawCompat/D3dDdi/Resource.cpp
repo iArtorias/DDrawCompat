@@ -923,6 +923,13 @@ namespace D3dDdi
 			{
 				loadFromLockRefResource(*m_msaaSurface.resource, subResourceIndex);
 			}
+			else if (m_lockData[subResourceIndex].isMsaaResolvedUpToDate)
+			{
+				const RECT rect = m_msaaSurface.resource->getRect(subResourceIndex);
+				m_device.getShaderBlitter().depthCopy(*m_msaaSurface.resource, subResourceIndex, rect,
+					*m_msaaResolvedSurface.resource, subResourceIndex, rect,
+					m_stencilResolvedSurface.resource);
+			}
 			else
 			{
 				loadVidMemResource(subResourceIndex);
@@ -1155,6 +1162,10 @@ namespace D3dDdi
 			if (m_lockRefSurface.resource &&
 				(m_lockData[subResourceIndex].isMsaaResolvedUpToDate || m_lockData[subResourceIndex].isMsaaUpToDate))
 			{
+				if (m_origData.Flags.ZBuffer && m_msaaSurface.resource)
+				{
+					loadMsaaResource(subResourceIndex);
+				}
 				loadVidMemResource(subResourceIndex);
 				copySubResource(*m_lockRefSurface.resource, m_handle, subResourceIndex);
 				m_lockData[subResourceIndex].isRefLocked = true;
