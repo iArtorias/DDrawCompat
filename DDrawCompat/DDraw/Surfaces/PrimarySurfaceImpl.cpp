@@ -160,21 +160,22 @@ namespace DDraw
 			HWND hwnd = nullptr;
 			clipper->GetHWnd(clipper, &hwnd);
 			isRedirected = !hwnd || Gdi::isRedirected(hwnd);
-			if (!isRedirected)
-			{
-				auto realPrimary(RealPrimarySurface::getSurface());
-				CompatPtr<IDirectDrawClipper> realClipper;
-				realPrimary->GetClipper(realPrimary, &realClipper.getRef());
-				realPrimary->SetClipper(realPrimary, clipper);
-				auto src(CompatPtr<IDirectDrawSurface7>::from(lpDDSrcSurface));
-				result = realPrimary->Blt(realPrimary, lpDestRect, src, lpSrcRect, dwFlags, lpDDBltFx);
-				realPrimary->SetClipper(realPrimary, realClipper);
-			}
 		}
 
-		if (isRedirected)
+		if (isRedirected || !RealPrimarySurface::isFullscreen())
 		{
 			result = SurfaceImpl<TSurface>::Blt(This, lpDestRect, lpDDSrcSurface, lpSrcRect, dwFlags, lpDDBltFx);
+		}
+
+		if (!isRedirected)
+		{
+			auto realPrimary(RealPrimarySurface::getSurface());
+			CompatPtr<IDirectDrawClipper> realClipper;
+			realPrimary->GetClipper(realPrimary, &realClipper.getRef());
+			realPrimary->SetClipper(realPrimary, clipper);
+			auto src(CompatPtr<IDirectDrawSurface7>::from(lpDDSrcSurface));
+			result = realPrimary->Blt(realPrimary, lpDestRect, src, lpSrcRect, dwFlags, lpDDBltFx);
+			realPrimary->SetClipper(realPrimary, realClipper);
 		}
 
 		if (SUCCEEDED(result))
