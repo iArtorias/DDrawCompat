@@ -529,7 +529,6 @@ namespace D3dDdi
 		data.hSrcResource = src;
 		data.SrcSubResourceIndex = srcIndex;
 		data.SrcRect = srcRect;
-		data.Flags.Point = 1;
 
 		HRESULT result = m_device.getOrigVtable().pfnBlt(m_device, &data);
 		if (FAILED(result) && (dst != m_lockResource.get() || 0 == m_gdiRect.right))
