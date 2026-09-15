@@ -111,7 +111,7 @@ namespace
 	decltype(&GetSystemMetricsForDpi) g_origGetSystemMetricsForDpi = nullptr;
 	DWORD g_desktopBpp = 0;
 	SIZE g_desktopResolution = {};
-	ULONG g_displaySettingsUniquenessBias = 0;
+	ULONG g_displaySettingsUniqueness = 0;
 	EmulatedDisplayMode g_emulatedDisplayMode = {};
 	ULONG g_monitorInfoUniqueness = 0;
 	std::map<HMONITOR, Win32::DisplayMode::MonitorInfo> g_monitorInfo;
@@ -259,22 +259,13 @@ namespace
 			origEnumDisplaySettingsEx(lpszDeviceName, ENUM_CURRENT_SETTINGS, &prevDevMode, 0);
 		}
 
-		const auto prevDisplaySettingsUniqueness = CALL_ORIG_FUNC(GdiEntry13);
 		LONG result = origChangeDisplaySettingsEx(lpszDeviceName, lpDevMode, hwnd, dwflags, lParam);
-		if (dwflags & CDS_TEST)
+		if ((dwflags & CDS_TEST) || DISP_CHANGE_SUCCESSFUL != result)
 		{
 			return result;
 		}
 
-		if (CALL_ORIG_FUNC(GdiEntry13) == prevDisplaySettingsUniqueness)
-		{
-			setDwmDxFullscreenTransitionEvent();
-		}
-
-		if (DISP_CHANGE_SUCCESSFUL != result)
-		{
-			return result;
-		}
+		setDwmDxFullscreenTransitionEvent();
 
 		DevMode<Char> currDevMode = {};
 		currDevMode.dmSize = sizeof(currDevMode);
@@ -316,7 +307,7 @@ namespace
 			enumDisplaySettingsEx(lpszDeviceName, ENUM_CURRENT_SETTINGS, &currEmulatedDevMode, 0);
 			if (0 != memcmp(&prevEmulatedDevMode, &currEmulatedDevMode, sizeof(currEmulatedDevMode)))
 			{
-				++g_displaySettingsUniquenessBias;
+				++g_displaySettingsUniqueness;
 			}
 		}
 
@@ -509,7 +500,7 @@ namespace
 	ULONG WINAPI gdiEntry13()
 	{
 		Compat::ScopedCriticalSection lock(g_cs);
-		return CALL_ORIG_FUNC(GdiEntry13)() + g_displaySettingsUniquenessBias;
+		return g_displaySettingsUniqueness;
 	}
 
 	int getAdjustedDisplayMetrics(int nIndex, int cxIndex)
@@ -947,7 +938,7 @@ namespace
 
 	void updateMonitorInfo()
 	{
-		const auto uniqueness = gdiEntry13();
+		const auto uniqueness = CALL_ORIG_FUNC(GdiEntry13)() + g_displaySettingsUniqueness;
 		if (uniqueness != g_monitorInfoUniqueness || g_monitorInfo.empty())
 		{
 			g_monitorInfo.clear();
@@ -1046,7 +1037,7 @@ namespace Win32
 		void incDisplaySettingsUniqueness()
 		{
 			Compat::ScopedCriticalSection lock(g_cs);
-			++g_displaySettingsUniquenessBias;
+			++g_displaySettingsUniqueness;
 		}
 
 		ULONG queryDisplaySettingsUniqueness()
@@ -1070,6 +1061,7 @@ namespace Win32
 			isInstalled = true;
 
 			LOG_INFO << "Installing display mode hooks";
+
 			g_desktopBpp = Config::desktopColorDepth.get();
 			g_desktopResolution = Config::desktopResolution.get();
 
@@ -1091,6 +1083,8 @@ namespace Win32
 
 			g_emulatedDisplayMode.bpp = g_desktopBpp;
 
+			HOOK_FUNCTION(gdi32, GdiEntry13, gdiEntry13);
+
 			ChangeDisplaySettingsEx(nullptr, nullptr, nullptr, 0, nullptr);
 			EnumDisplayMonitors(nullptr, nullptr, &initMonitor, 0);
 
@@ -1101,7 +1095,6 @@ namespace Win32
 			HOOK_FUNCTION(user32, EnumDisplayDevicesW, enumDisplayDevices<EnumDisplayDevicesW>);
 			HOOK_FUNCTION(user32, EnumDisplaySettingsExA, enumDisplaySettingsExA);
 			HOOK_FUNCTION(user32, EnumDisplaySettingsExW, enumDisplaySettingsExW);
-			HOOK_FUNCTION(gdi32, GdiEntry13, gdiEntry13);
 			HOOK_FUNCTION(gdi32, GetDeviceCaps, getDeviceCaps);
 			HOOK_FUNCTION(user32, GetMonitorInfoA, ::getMonitorInfo<GetMonitorInfoA>);
 			HOOK_FUNCTION(user32, GetMonitorInfoW, ::getMonitorInfo<GetMonitorInfoW>);
