@@ -246,7 +246,7 @@ namespace
 				info->DedicatedVideoMemorySize += info->DedicatedSystemMemorySize;
 				info->DedicatedSystemMemorySize = 0;
 
-				const ULONGLONG maxMem = 0x3FFF0000;
+				const ULONGLONG maxMem = 512 * 1024 * 1024;
 				if (info->DedicatedVideoMemorySize < maxMem)
 				{
 					auto addedMem = std::min(maxMem - info->DedicatedVideoMemorySize, info->SharedSystemMemorySize);
