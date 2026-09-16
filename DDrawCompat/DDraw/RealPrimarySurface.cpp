@@ -61,6 +61,7 @@ namespace
 	bool g_isUpdatePending = false;
 	bool g_isUpdateReady = false;
 	long long g_qpcUpdateStart = 0;
+	long long g_qpcLastDelayedUpdate = 0;
 
 	HWND g_deviceWindow = nullptr;
 	HWND* g_deviceWindowPtr = nullptr;
@@ -122,6 +123,19 @@ namespace
 		}
 
 		return 1;
+	}
+
+	UINT getMaxPresentDelay()
+	{
+		if (Config::Settings::PresentDelay::AUTO == Config::presentDelay.get())
+		{
+			Compat::ScopedCriticalSection lock(g_presentCs);
+			if (Time::qpcToMs(Time::queryPerformanceCounter() - g_qpcLastDelayedUpdate) > 500)
+			{
+				return 0;
+			}
+		}
+		return Config::presentDelay.getParam();
 	}
 
 	void onRelease()
@@ -550,7 +564,7 @@ namespace DDraw
 			scheduleUpdate(true);
 			D3dDdi::KernelModeThunks::waitForFlipEnd();
 		}
-		else if (!Config::presentDelay.get())
+		else if (0 == getMaxPresentDelay())
 		{
 			scheduleUpdate(true);
 		}
@@ -596,7 +610,7 @@ namespace DDraw
 				if (g_isUpdatePending)
 				{
 					auto msSinceUpdateStart = Time::qpcToMs(Time::queryPerformanceCounter() - g_qpcUpdateStart);
-					const auto presentDelay = Config::presentDelay.getParam();
+					const auto presentDelay = getMaxPresentDelay();
 					if (msSinceUpdateStart < presentDelay)
 					{
 						return presentDelay - static_cast<int>(msSinceUpdateStart);
@@ -741,7 +755,7 @@ namespace DDraw
 
 	void RealPrimarySurface::scheduleUpdate(bool allowFlush)
 	{
-		const bool isPresentDelayEnabled = Config::presentDelay.get();
+		const bool isPresentDelayEnabled = 0 != getMaxPresentDelay();
 
 		{
 			Compat::ScopedCriticalSection lock(g_presentCs);
@@ -757,6 +771,16 @@ namespace DDraw
 		{
 			flush();
 		}
+	}
+
+	void RealPrimarySurface::scheduleUpdateWithPresentDelay(bool allowFlush)
+	{
+		if (Config::Settings::PresentDelay::AUTO == Config::presentDelay.get())
+		{
+			Compat::ScopedCriticalSection lock(g_presentCs);
+			g_qpcLastDelayedUpdate = Time::queryPerformanceCounter();
+		}
+		scheduleUpdate(allowFlush);
 	}
 
 	HRESULT RealPrimarySurface::setGammaRamp(DDGAMMARAMP* rampData)

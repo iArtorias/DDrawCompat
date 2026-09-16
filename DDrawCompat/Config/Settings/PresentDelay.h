@@ -1,21 +1,23 @@
 #pragma once
 
-#include <Config/BoolSetting.h>
+#include <Config/EnumSetting.h>
 
 namespace Config
 {
 	namespace Settings
 	{
-		class PresentDelay : public BoolSetting
+		class PresentDelay : public EnumSetting
 		{
 		public:
-			PresentDelay() : BoolSetting("PresentDelay", "on")
+			enum Values { OFF, ON, AUTO };
+
+			PresentDelay() : EnumSetting("PresentDelay", "auto", { "off", "on", "auto" })
 			{
 			}
 
 			virtual ParamInfo getParamInfo() const override
 			{
-				if (m_value)
+				if (OFF != m_value)
 				{
 					return { "MaxDelay", 1, 50, 10 };
 				}

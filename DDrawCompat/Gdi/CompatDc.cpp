@@ -47,7 +47,7 @@ namespace Gdi
 			auto gdiResource = D3dDdi::Device::getGdiResource();
 			if (!m_isReadOnly && (!gdiResource || DDraw::PrimarySurface::getFrontResource() == *gdiResource))
 			{
-				DDraw::RealPrimarySurface::scheduleUpdate();
+				DDraw::RealPrimarySurface::scheduleUpdateWithPresentDelay();
 			}
 			Gdi::Dc::releaseDc(m_origDc);
 		}

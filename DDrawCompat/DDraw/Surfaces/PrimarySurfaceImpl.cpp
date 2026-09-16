@@ -1,4 +1,5 @@
 #include <Common/CompatPtr.h>
+#include <Config/Settings/PresentDelay.h>
 #include <Config/Settings/FpsLimiter.h>
 #include <Config/Settings/GdiInterops.h>
 #include <D3dDdi/KernelModeThunks.h>
@@ -83,6 +84,15 @@ namespace
 			isFsBlt(lpDestRect->right, lpDestRect->bottom);
 	}
 
+	bool isFsBlt(int& cache, LPRECT lpDestRect)
+	{
+		if (0 == cache)
+		{
+			cache = isFsBlt(lpDestRect) ? 1 : -1;
+		}
+		return 1 == cache;
+	}
+
 	template <typename TSurface>
 	bool isFsBltFast(DWORD dwX, DWORD dwY, TSurface* lpDDSrcSurface, LPRECT lpSrcRect)
 	{
@@ -100,6 +110,16 @@ namespace
 		desc.dwSize = sizeof(desc);
 		getOrigVtable(lpDDSrcSurface).GetSurfaceDesc(lpDDSrcSurface, &desc);
 		return isFsBlt(desc.dwWidth, desc.dwHeight);
+	}
+
+	template <typename TSurface>
+	bool isFsBltFast(int& cache, DWORD dwX, DWORD dwY, TSurface* lpDDSrcSurface, LPRECT lpSrcRect)
+	{
+		if (0 == cache)
+		{
+			cache = isFsBltFast(dwX, dwY, lpDDSrcSurface, lpSrcRect) ? 1 : -1;
+		}
+		return 1 == cache;
 	}
 
 	void restorePrimaryCaps(DWORD& caps)
@@ -145,7 +165,8 @@ namespace DDraw
 
 		RealPrimarySurface::flush();
 		const auto fpsLimiter = RealPrimarySurface::getFpsLimiter();
-		if (Config::Settings::FpsLimiter::FLIPSTART == fpsLimiter.value && isFsBlt(lpDestRect))
+		int isFsBltCache = 0;
+		if (Config::Settings::FpsLimiter::FLIPSTART == fpsLimiter.value && isFsBlt(isFsBltCache, lpDestRect))
 		{
 			RealPrimarySurface::waitForFlipFpsLimit(fpsLimiter.param);
 		}
@@ -184,15 +205,25 @@ namespace DDraw
 			{
 				bltToGdi(This, lpDestRect, lpDDSrcSurface, lpSrcRect, dwFlags, lpDDBltFx);
 			}
+
 			auto statsWindow = Gdi::GuiThread::getStatsWindow();
 			if (statsWindow)
 			{
 				statsWindow->m_blit.add();
 			}
-			RealPrimarySurface::scheduleUpdate(true);
+
+			if (Config::Settings::PresentDelay::AUTO == Config::presentDelay.get() &&
+				isFsBlt(isFsBltCache, lpDestRect))
+			{
+				RealPrimarySurface::scheduleUpdate(true);
+			}
+			else
+			{
+				RealPrimarySurface::scheduleUpdateWithPresentDelay(true);
+			}
 		}
 
-		if (Config::Settings::FpsLimiter::FLIPEND == fpsLimiter.value && isFsBlt(lpDestRect))
+		if (Config::Settings::FpsLimiter::FLIPEND == fpsLimiter.value && isFsBlt(isFsBltCache, lpDestRect))
 		{
 			RealPrimarySurface::waitForFlipFpsLimit(fpsLimiter.param);
 		}
@@ -210,8 +241,9 @@ namespace DDraw
 
 		RealPrimarySurface::flush();
 		const auto fpsLimiter = RealPrimarySurface::getFpsLimiter();
+		int isFsBltFastCache = 0;
 		if (Config::Settings::FpsLimiter::FLIPSTART == fpsLimiter.value
-			&& isFsBltFast(dwX, dwY, lpDDSrcSurface, lpSrcRect))
+			&& isFsBltFast(isFsBltFastCache, dwX, dwY, lpDDSrcSurface, lpSrcRect))
 		{
 			RealPrimarySurface::waitForFlipFpsLimit(fpsLimiter.param);
 		}
@@ -223,10 +255,18 @@ namespace DDraw
 			{
 				statsWindow->m_blit.add();
 			}
-			RealPrimarySurface::scheduleUpdate(true);
+			if (Config::Settings::PresentDelay::AUTO == Config::presentDelay.get() &&
+				isFsBltFast(isFsBltFastCache && dwX, dwY, lpDDSrcSurface, lpSrcRect))
+			{
+				RealPrimarySurface::scheduleUpdate(true);
+			}
+			else
+			{
+				RealPrimarySurface::scheduleUpdateWithPresentDelay(true);
+			}
 		}
 		if (Config::Settings::FpsLimiter::FLIPEND == fpsLimiter.value
-			&& isFsBltFast(dwX, dwY, lpDDSrcSurface, lpSrcRect))
+			&& isFsBltFast(isFsBltFastCache, dwX, dwY, lpDDSrcSurface, lpSrcRect))
 		{
 			RealPrimarySurface::waitForFlipFpsLimit(fpsLimiter.param);
 		}
@@ -348,7 +388,7 @@ namespace DDraw
 			{
 				statsWindow->m_lock.add();
 			}
-			RealPrimarySurface::scheduleUpdate();
+			RealPrimarySurface::scheduleUpdateWithPresentDelay();
 		}
 		return result;
 	}
@@ -395,7 +435,7 @@ namespace DDraw
 			{
 				statsWindow->m_lock.add();
 			}
-			RealPrimarySurface::scheduleUpdate();
+			RealPrimarySurface::scheduleUpdateWithPresentDelay();
 		}
 		return result;
 	}
@@ -406,7 +446,7 @@ namespace DDraw
 		HRESULT result = SurfaceImpl<TSurface>::ReleaseDC(This, hDC);
 		if (SUCCEEDED(result))
 		{
-			RealPrimarySurface::scheduleUpdate(true);
+			RealPrimarySurface::scheduleUpdateWithPresentDelay(true);
 		}
 		return result;
 	}
@@ -450,7 +490,7 @@ namespace DDraw
 		HRESULT result = SurfaceImpl<TSurface>::Unlock(This, lpRect);
 		if (SUCCEEDED(result))
 		{
-			RealPrimarySurface::scheduleUpdate(true);
+			RealPrimarySurface::scheduleUpdateWithPresentDelay(true);
 		}
 		return result;
 	}

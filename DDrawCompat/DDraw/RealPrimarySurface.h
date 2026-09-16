@@ -30,6 +30,7 @@ namespace DDraw
 		static HRESULT restore();
 		static void scheduleOverlayUpdate();
 		static void scheduleUpdate(bool allowFlush = false);
+		static void scheduleUpdateWithPresentDelay(bool allowFlush = false);
 		static HRESULT setGammaRamp(DDGAMMARAMP* rampData);
 		static void setPresentationWindowTopmost();
 		static void setUpdateReady();
