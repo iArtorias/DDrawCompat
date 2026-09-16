@@ -159,19 +159,17 @@ namespace
 			return r;
 		}
 
+		RECT windowRect = {};
+		DwmGetWindowAttribute(foregroundWindow, DWMWA_EXTENDED_FRAME_BOUNDS, &windowRect, sizeof(windowRect));
+		LOG_DEBUG << "Foreground window rect: " << windowRect;
+
 		DWORD pid = 0;
 		GetWindowThreadProcessId(foregroundWindow, &pid);
 		if (GetCurrentProcessId() != pid)
 		{
 			LOG_DEBUG << "Foreground window doesn't belong to current process";
-			RECT r = {};
-			DwmGetWindowAttribute(foregroundWindow, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r));
-			return LOG_RESULT(r);
+			return LOG_RESULT(windowRect);
 		}
-
-		RECT windowRect = {};
-		CALL_ORIG_FUNC(GetWindowRect)(foregroundWindow, &windowRect);
-		LOG_DEBUG << "Foreground window rect: " << windowRect;
 
 		auto dm = Win32::DisplayMode::getEmulatedDisplayMode();
 		if (dm.deviceName.empty())
