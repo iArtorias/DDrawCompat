@@ -8,6 +8,7 @@
 #include <Common/Hook.h>
 #include <Common/Rect.h>
 #include <Config/Settings/ConfigHotKey.h>
+#include <Config/Settings/GdiInterops.h>
 #include <Config/Settings/StatsHotKey.h>
 #include <D3dDdi/Adapter.h>
 #include <D3dDdi/ScopedCriticalSection.h>
@@ -235,14 +236,20 @@ namespace
 	BOOL CALLBACK initTopLevelWindow(HWND hwnd, LPARAM /*lParam*/)
 	{
 		DWORD windowPid = 0;
-		GetWindowThreadProcessId(hwnd, &windowPid);
-		if (GetCurrentProcessId() == windowPid)
+		const DWORD windowTid = GetWindowThreadProcessId(hwnd, &windowPid);
+		if (GetCurrentProcessId() == windowPid && windowTid != g_threadId)
 		{
 			Gdi::WinProc::onCreateWindow(hwnd);
 			CALL_ORIG_FUNC(EnumChildWindows)(hwnd, &initChildWindow, 0);
 			if (8 == Win32::DisplayMode::getBpp())
 			{
 				PostMessage(hwnd, WM_PALETTECHANGED, reinterpret_cast<WPARAM>(GetDesktopWindow()), 0);
+			}
+			if (Config::gdiInterops.get().themes)
+			{
+				SendNotifyMessage(hwnd, WM_THEMECHANGED, 0, 0);
+				SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_ASYNCWINDOWPOS | SWP_FRAMECHANGED | SWP_NOACTIVATE |
+					SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING | SWP_NOSIZE | SWP_NOZORDER);
 			}
 		}
 		return TRUE;
