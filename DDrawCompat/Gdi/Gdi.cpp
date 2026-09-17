@@ -162,20 +162,30 @@ namespace Gdi
 	bool isRedirected(HWND hwnd)
 	{
 		const HWND root = GetAncestor(hwnd, GA_ROOT);
-		const DWORD rootAtom = root ? GetClassLongA(root, GCW_ATOM) : MAXDWORD;
-		if (!root && !Config::gdiInterops.get().desktop ||
-			DIALOG_ATOM == rootAtom && !Config::gdiInterops.get().dialogs ||
-			!Config::gdiInterops.get().windows ||
+		const DWORD rootAtom = root ? GetClassLongA(root, GCW_ATOM) : 0;
+		if (0 == rootAtom)
+		{
+			return Config::gdiInterops.get().desktop;
+		}
+
+		if (DIALOG_ATOM == rootAtom)
+		{
+			if (!Config::gdiInterops.get().dialogs)
+			{
+				return false;
+			}
+		}
+		else if (!Config::gdiInterops.get().windows ||
 			MENU_ATOM == rootAtom ||
 			g_autoSuggestDropdownAtom == rootAtom && !isRedirected(GetParent(hwnd)) ||
 			g_comboLBoxAtom == rootAtom && !GetPropA(root, "DDCRedirected") ||
 			g_microsoftWindowsTooltipAtom == rootAtom ||
-			g_tooltips_class32Atom == rootAtom ||
-			(CALL_ORIG_FUNC(GetWindowLongA)(root, GWL_EXSTYLE) & WS_EX_LAYERED))
+			g_tooltips_class32Atom == rootAtom)
 		{
 			return false;
 		}
-		return true;
+
+		return !(CALL_ORIG_FUNC(GetWindowLongA)(root, GWL_EXSTYLE) & WS_EX_LAYERED);
 	}
 
 	bool isRedirected(HDC dc)
