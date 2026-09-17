@@ -18,8 +18,11 @@ namespace Win32
 	{
 		void init();
 
+		bool isEqual(DPI_AWARENESS_CONTEXT lhs, DPI_AWARENESS_CONTEXT rhs);
 		bool isMixedModeSupported();
+		bool isMixedWindow(HWND hwnd);
 
+		DPI_AWARENESS_CONTEXT getDefaultContext();
 		DPI_AWARENESS_CONTEXT getThreadContext();
 		DPI_AWARENESS_CONTEXT setThreadContext(DPI_AWARENESS_CONTEXT context);
 	}

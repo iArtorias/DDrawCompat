@@ -158,10 +158,9 @@ namespace
 		return LOG_RESULT(result);
 	}
 
-	LRESULT CALLBACK ddcWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+	LRESULT CALLBACK ddcWindowProcInternal(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 		decltype(&CallWindowProcA) callWindowProc, WNDPROC wndProc)
 	{
-		LOG_FUNC("ddcWindowProc", Compat::WindowMessageStruct(hwnd, uMsg, wParam, lParam));
 		ScopedIncrement inc(g_inWindowProc);
 		POINT cursorPos = {};
 
@@ -181,7 +180,7 @@ namespace
 		case WM_DISPLAYCHANGE:
 			if (0 != wParam)
 			{
-				return LOG_RESULT(0);
+				return 0;
 			}
 			wParam = Win32::DisplayMode::getBpp();
 			break;
@@ -192,7 +191,7 @@ namespace
 
 		case WM_DWMSENDICONICTHUMBNAIL:
 			dwmSendIconicThumbnail(hwnd, HIWORD(lParam), LOWORD(lParam));
-			return LOG_RESULT(0);
+			return 0;
 
 		case WM_GETMINMAXINFO:
 			onGetMinMaxInfo(*reinterpret_cast<MINMAXINFO*>(lParam));
@@ -216,7 +215,7 @@ namespace
 			{
 				RECT emptyRect = {};
 				RedrawWindow(hwnd, &emptyRect, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ERASENOW);
-				return LOG_RESULT(0);
+				return 0;
 			}
 			break;
 
@@ -316,7 +315,14 @@ namespace
 			break;
 		}
 
-		return LOG_RESULT(result);
+		return result;
+	}
+
+	LRESULT CALLBACK ddcWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+		decltype(&CallWindowProcA) callWindowProc, WNDPROC wndProc)
+	{
+		LOG_FUNC("ddcWindowProc", Compat::WindowMessageStruct(hwnd, uMsg, wParam, lParam));
+		return LOG_RESULT(ddcWindowProcInternal(hwnd, uMsg, wParam, lParam, callWindowProc, wndProc));
 	}
 
 	LRESULT CALLBACK ddcWindowProcA(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -327,6 +333,24 @@ namespace
 	LRESULT CALLBACK ddcWindowProcW(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	{
 		return ddcWindowProc(hwnd, uMsg, wParam, lParam, CallWindowProcW, getWindowProc(hwnd).wndProcW);
+	}
+
+	LRESULT CALLBACK ddcMixedWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
+		decltype(&CallWindowProcA) callWindowProc, WNDPROC wndProc)
+	{
+		Win32::ScopedDpiAwareness dpiAwareness(Win32::DpiAwareness::getDefaultContext());
+		LOG_FUNC("ddcMixedWindowProc", Compat::WindowMessageStruct(hwnd, uMsg, wParam, lParam));
+		return LOG_RESULT(ddcWindowProcInternal(hwnd, uMsg, wParam, lParam, callWindowProc, wndProc));
+	}
+
+	LRESULT CALLBACK ddcMixedWindowProcA(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+	{
+		return ddcMixedWindowProc(hwnd, uMsg, wParam, lParam, CallWindowProcA, getWindowProc(hwnd).wndProcA);
+	}
+
+	LRESULT CALLBACK ddcMixedWindowProcW(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+	{
+		return ddcMixedWindowProc(hwnd, uMsg, wParam, lParam, CallWindowProcW, getWindowProc(hwnd).wndProcW);
 	}
 
 	LONG WINAPI ddrawSetWindowLongA(HWND hWnd, int nIndex, LONG dwNewLong)
@@ -819,7 +843,17 @@ namespace
 				WNDPROC oldWndProc = it->second.*wndProc;
 				it->second.wndProcA = reinterpret_cast<WNDPROC>(CALL_ORIG_FUNC(GetWindowLongA)(hWnd, GWL_WNDPROC));
 				it->second.wndProcW = reinterpret_cast<WNDPROC>(CALL_ORIG_FUNC(GetWindowLongW)(hWnd, GWL_WNDPROC));
-				WindowProc newWindowProc = { ddcWindowProcA, ddcWindowProcW };
+				WindowProc newWindowProc = {};
+				if (Win32::DpiAwareness::isMixedWindow(hWnd))
+				{
+					newWindowProc.wndProcA = ddcMixedWindowProcA;
+					newWindowProc.wndProcW = ddcMixedWindowProcW;
+				}
+				else
+				{
+					newWindowProc.wndProcA = ddcWindowProcA;
+					newWindowProc.wndProcW = ddcWindowProcW;
+				}
 				origSetWindowLong(hWnd, GWL_WNDPROC, reinterpret_cast<LONG>(newWindowProc.*wndProc));
 				return reinterpret_cast<LONG>(oldWndProc);
 			}
@@ -1190,7 +1224,14 @@ namespace Gdi
 				auto wndProcA = reinterpret_cast<WNDPROC>(CALL_ORIG_FUNC(GetWindowLongA)(hwnd, GWL_WNDPROC));
 				auto wndProcW = reinterpret_cast<WNDPROC>(CALL_ORIG_FUNC(GetWindowLongW)(hwnd, GWL_WNDPROC));
 				g_windowProc[hwnd] = { wndProcA, wndProcW };
-				setWindowProc(hwnd, ddcWindowProcA, ddcWindowProcW);
+				if (Win32::DpiAwareness::isMixedWindow(hwnd))
+				{
+					setWindowProc(hwnd, ddcMixedWindowProcA, ddcMixedWindowProcW);
+				}
+				else
+				{
+					setWindowProc(hwnd, ddcWindowProcA, ddcWindowProcW);
+				}
 			}
 
 			if (!Gdi::Window::isTopLevelWindow(hwnd))

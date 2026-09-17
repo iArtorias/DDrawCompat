@@ -4,6 +4,13 @@
 
 #include <Windows.h>
 
+namespace Compat
+{
+	class LogStream;
+
+	LogStream operator<<(LogStream os, const DPI_AWARENESS_CONTEXT__* ctx);
+}
+
 std::ostream& operator<<(std::ostream& os, const BITMAP& bm);
 std::ostream& operator<<(std::ostream& os, const BITMAPINFO& bmi);
 std::ostream& operator<<(std::ostream& os, const BITMAPINFOHEADER& bmih);

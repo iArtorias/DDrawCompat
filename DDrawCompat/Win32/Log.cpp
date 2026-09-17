@@ -3,7 +3,37 @@
 #include <Common/Hook.h>
 #include <Common/Log.h>
 #include <Common/Path.h>
+#include <Win32/DpiAwareness.h>
 #include <Win32/Log.h>
+
+namespace Compat
+{
+	LogStream operator<<(LogStream os, const DPI_AWARENESS_CONTEXT__* ctx)
+	{
+		const auto c = const_cast<DPI_AWARENESS_CONTEXT>(ctx);
+		if (Win32::DpiAwareness::isEqual(c, DPI_AWARENESS_CONTEXT_UNAWARE))
+		{
+			return os << "unaware";
+		}
+		else if (Win32::DpiAwareness::isEqual(c, DPI_AWARENESS_CONTEXT_SYSTEM_AWARE))
+		{
+			return os << "system";
+		}
+		else if (Win32::DpiAwareness::isEqual(c, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE))
+		{
+			return os << "permonitor";
+		}
+		else if (Win32::DpiAwareness::isEqual(c, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+		{
+			return os << "permonitorv2";
+		}
+		else if (Win32::DpiAwareness::isEqual(c, DPI_AWARENESS_CONTEXT_UNAWARE_GDISCALED))
+		{
+			return os << "gdiscaled";
+		}
+		return os << "unknown(" << static_cast<void*>(c) << ')';
+	}
+}
 
 namespace
 {
