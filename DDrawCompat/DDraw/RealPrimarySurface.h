@@ -23,6 +23,7 @@ namespace DDraw
 		HRESULT getGammaRamp(DDGAMMARAMP* rampData);
 		CompatPtr<IDirectDrawSurface7> getLastSurface();
 		CompatWeakPtr<IDirectDrawSurface7> getSurface();
+		bool isDShowPrimary();
 		bool isFullscreen();
 		bool isLost();
 		HRESULT setGammaRamp(DDGAMMARAMP* rampData);
@@ -51,5 +52,6 @@ namespace DDraw
 		HWND* m_deviceWindowPtr = nullptr;
 		Surface* m_lastFlipSurface = nullptr;
 		bool m_isFullscreen = false;
+		bool m_isDShowPrimary = false;
 	};
 }

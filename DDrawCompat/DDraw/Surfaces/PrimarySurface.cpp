@@ -245,7 +245,7 @@ namespace DDraw
 		LOG_FUNC("PrimarySurface::onRestore");
 
 		updatePalette();
-		if (m_realPrimary->isFullscreen())
+		if (m_realPrimary->isFullscreen() || m_realPrimary->isDShowPrimary())
 		{
 			Gdi::VirtualScreen::setFullscreenPrimary(*this);
 		}

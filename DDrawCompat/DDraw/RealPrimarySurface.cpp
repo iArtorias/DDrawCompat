@@ -103,6 +103,11 @@ namespace
 		return Config::presentDelay.getParam();
 	}
 
+	void logBypassExclusiveModeCheck()
+	{
+		LOG_ONCE("Using feature: bypassing exclusive mode check for GOG.com DirectShow wrapper (dshow.dll)");
+	}
+
 	void presentationBlt(CompatRef<IDirectDrawSurface7> dst, CompatWeakPtr<IDirectDrawSurface7> src)
 	{
 		LOG_FUNC("RealPrimarySurface::presentationBlt", &dst.get(), src.get());
@@ -469,6 +474,18 @@ namespace DDraw
 			desc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
 			desc.dwBackBufferCount = 0;
 			result = dd->CreateSurface(&dd, &desc, &surface.getRef(), nullptr);
+
+			if (DDERR_NOEXCLUSIVEMODE == result && GetModuleHandle("dshow.dll"))
+			{
+				logBypassExclusiveModeCheck();
+				auto ddLcl = DirectDraw::getInt(dd.get()).lpLcl;
+				auto& exclusiveOwner = ddLcl->lpGbl->lpExclusiveOwner;
+				auto prevExclusiveOwner = exclusiveOwner;
+				exclusiveOwner = ddLcl;
+				result = dd->CreateSurface(&dd, &desc, &surface.getRef(), nullptr);
+				exclusiveOwner = prevExclusiveOwner;
+				m_isDShowPrimary = true;
+			}
 		}
 
 		if (FAILED(result))
@@ -684,6 +701,11 @@ namespace DDraw
 		g_isExclusiveFullscreen = Config::Settings::FullscreenMode::EXCLUSIVE == Config::fullscreenMode.get() ||
 			!IsWindows8OrGreater();
 		Dll::createThread(&updateThreadProc, nullptr, THREAD_PRIORITY_TIME_CRITICAL);
+	}
+
+	bool RealPrimarySurface::isDShowPrimary()
+	{
+		return m_isDShowPrimary;
 	}
 
 	bool RealPrimarySurface::isExclusiveFullscreen()
