@@ -12,7 +12,6 @@
 #include <Config/Settings/SoftwareDevice.h>
 #include <D3dDdi/Adapter.h>
 #include <D3dDdi/Device.h>
-#include <D3dDdi/KernelModeThunks.h>
 #include <D3dDdi/Resource.h>
 #include <D3dDdi/SurfaceRepository.h>
 #include <DDraw/DirectDraw.h>
@@ -118,13 +117,14 @@ namespace
 		}
 
 		return result = DDraw::Surface::create<TDirectDraw>(*This, desc, *lplpDDSurface,
-			std::make_unique<DDraw::Surface>(desc.dwFlags, lpDDSurfaceDesc->ddsCaps.dwCaps));
+			std::make_unique<DDraw::Surface>(desc.dwFlags, lpDDSurfaceDesc->ddsCaps));
 	}
 
 	template <typename TDirectDraw>
-	HRESULT STDMETHODCALLTYPE FlipToGDISurface(TDirectDraw* /*This*/)
+	HRESULT STDMETHODCALLTYPE FlipToGDISurface(TDirectDraw* This)
 	{
-		return DDraw::PrimarySurface::flipToGdiSurface();
+		auto primary = DDraw::DirectDraw::getPrimary(*This);
+		return primary ? primary->flipToGdiSurface() : DDERR_NOTFOUND;
 	}
 
 	template <typename TDirectDraw>
@@ -144,14 +144,20 @@ namespace
 	}
 
 	template <typename TDirectDraw, typename TSurface>
-	HRESULT STDMETHODCALLTYPE GetGDISurface(TDirectDraw* /*This*/, TSurface** lplpGDIDDSSurface)
+	HRESULT STDMETHODCALLTYPE GetGDISurface(TDirectDraw* This, TSurface** lplpGDIDDSSurface)
 	{
 		if (!lplpGDIDDSSurface)
 		{
-			return DDERR_INVALIDPARAMS;
+			return getOrigVtable(This).GetGDISurface(This, lplpGDIDDSSurface);
 		}
 
-		auto gdiSurface(DDraw::PrimarySurface::getGdiSurface());
+		auto primary(DDraw::DirectDraw::getPrimary(*This));
+		if (!primary)
+		{
+			return DDERR_NOTFOUND;
+		}
+
+		auto gdiSurface(primary->getGdiSurface());
 		if (!gdiSurface)
 		{
 			return DDERR_NOTFOUND;
@@ -164,10 +170,14 @@ namespace
 	template <typename TDirectDraw>
 	HRESULT STDMETHODCALLTYPE RestoreAllSurfaces(TDirectDraw* This)
 	{
-		auto primary(DDraw::PrimarySurface::getPrimary());
-		if (primary)
+		auto tagSurface = DDraw::TagSurface::get(*CompatPtr<IDirectDraw>::from(This));
+		if (tagSurface)
 		{
-			primary.get()->lpVtbl->Restore(primary);
+			auto primary = tagSurface->getPrimary();
+			if (primary)
+			{
+				primary->getDDS().get()->lpVtbl->Restore(primary->getDDS());
+			}
 		}
 		return getOrigVtable(This).RestoreAllSurfaces(This);
 	}
@@ -188,7 +198,11 @@ namespace
 					tagSurface->setFullscreenWindow(isFullscreen ? hWnd : nullptr);
 					if (!isFullscreen)
 					{
-						DDraw::PrimarySurface::setWindowedCooperativeLevel();
+						auto primary = tagSurface->getPrimary();
+						if (primary)
+						{
+							primary->setWindowedCooperativeLevel();
+						}
 					}
 				}
 			}
@@ -212,7 +226,7 @@ namespace
 
 	LRESULT WINAPI ddrawWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	{
-		LOG_FUNC("ddrawWindowProc", hwnd, uMsg, wParam, lParam);
+		LOG_FUNC("ddrawWindowProc", Compat::WindowMessageStruct(hwnd, uMsg, wParam, lParam));
 		switch (uMsg)
 		{
 		case WM_ACTIVATEAPP:
@@ -325,11 +339,15 @@ namespace
 
 		if (wParam && keepPrimary)
 		{
-			auto realPrimary(DDraw::RealPrimarySurface::getSurface());
-			if (realPrimary)
-			{
-				DDraw::RealPrimarySurface::restore();
-			}
+			DDraw::TagSurface::enumTagSurfaces([](DDraw::TagSurface& tagSurface)
+				{
+					auto primary = tagSurface.getPrimary();
+					if (primary)
+					{
+						primary->resetRealPrimary();
+					}
+					return true;
+				});
 			DDraw::RealPrimarySurface::suppressLost(false);
 		}
 

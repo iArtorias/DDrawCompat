@@ -3,11 +3,9 @@
 #include <Common/ScopedCriticalSection.h>
 #include <Config/Settings/GdiInterops.h>
 #include <Config/Settings/SurfacePatches.h>
-#include <D3dDdi/Device.h>
 #include <D3dDdi/Resource.h>
 #include <D3dDdi/ScopedCriticalSection.h>
 #include <DDraw/DirectDraw.h>
-#include <DDraw/DirectDrawSurface.h>
 #include <DDraw/RealPrimarySurface.h>
 #include <DDraw/ScopedThreadLock.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
@@ -34,7 +32,7 @@ namespace
 	HANDLE g_lastFullscreenSurfaceFileMapping = nullptr;
 	void* g_lastFullscreenSurfaceView = nullptr;
 	DWORD g_lastFullscreenSurfaceSize = 0;
-	bool g_isFullscreen = false;
+	DDraw::PrimarySurface* g_fullscreenPrimary = nullptr;
 
 	HGDIOBJ g_stockBitmap = nullptr;
 	RGBQUAD g_defaultPalette[256] = {};
@@ -139,7 +137,7 @@ namespace Gdi
 			return createDibSection(width, height, bpp, nullptr, useDefaultPalette);
 		}
 
-		CompatPtr<IDirectDrawSurface7> createSurface(const RECT& rect)
+		CompatPtr<IDirectDrawSurface7> createSurface(CompatWeakPtr<IDirectDraw7> dd, const RECT& rect)
 		{
 			DDraw::ScopedThreadLock ddLock;
 			D3dDdi::ScopedCriticalSection driverLock;
@@ -147,24 +145,6 @@ namespace Gdi
 
 			auto desc = getSurfaceDesc(rect);
 			if (!desc.lpSurface)
-			{
-				return nullptr;
-			}
-
-			auto primary(DDraw::PrimarySurface::getPrimary());
-			if (!primary)
-			{
-				return nullptr;
-			}
-
-			auto repo = DDraw::DirectDrawSurface::getSurfaceRepository(*DDraw::PrimarySurface::getPrimary());
-			if (!repo)
-			{
-				return nullptr;
-			}
-
-			auto dd(repo->getDirectDraw());
-			if (!dd)
 			{
 				return nullptr;
 			}
@@ -236,10 +216,20 @@ namespace Gdi
 			update();
 		}
 
-		void setFullscreenMode(bool isFullscreen)
+		void onReleasePrimary(DDraw::PrimarySurface& primary)
 		{
-			LOG_FUNC("VirtualScreen::setFullscreenMode", isFullscreen);
-			g_isFullscreen = isFullscreen;
+			LOG_FUNC("VirtualScreen::onReleasePrimary", &primary);
+			if (&primary == g_fullscreenPrimary)
+			{
+				g_fullscreenPrimary = nullptr;
+				update();
+			}
+		}
+
+		void setFullscreenPrimary(DDraw::PrimarySurface& primary)
+		{
+			LOG_FUNC("VirtualScreen::setFullscreenPrimary", &primary);
+			g_fullscreenPrimary = &primary;
 			update();
 		}
 
@@ -247,9 +237,9 @@ namespace Gdi
 		{
 			LOG_FUNC("VirtualScreen::update");
 			static auto prevDisplaySettingsUniqueness = Win32::DisplayMode::queryEmulatedDisplaySettingsUniqueness() - 1;
-			static bool prevIsFullscreen = false;
+			static DDraw::PrimarySurface* prevFullscreenPrimary = nullptr;
 
-			if (prevIsFullscreen == g_isFullscreen)
+			if (prevFullscreenPrimary == g_fullscreenPrimary)
 			{
 				Compat::ScopedCriticalSection lock(g_cs);
 				if (Win32::DisplayMode::queryEmulatedDisplaySettingsUniqueness() == prevDisplaySettingsUniqueness)
@@ -265,11 +255,11 @@ namespace Gdi
 				Compat::ScopedCriticalSection lock(g_cs);
 
 				prevDisplaySettingsUniqueness = Win32::DisplayMode::queryEmulatedDisplaySettingsUniqueness();
-				prevIsFullscreen = g_isFullscreen;
+				prevFullscreenPrimary = g_fullscreenPrimary;
 
-				if (g_isFullscreen)
+				if (g_fullscreenPrimary)
 				{
-					g_bounds = DDraw::PrimarySurface::getMonitorInfo().rcEmulated;
+					g_bounds = g_fullscreenPrimary->getMonitorInfo().rcEmulated;
 				}
 				else
 				{
@@ -279,9 +269,6 @@ namespace Gdi
 						UnionRect(&g_bounds, &g_bounds, &mi.second.rcMonitor);
 					}
 				}
-
-				auto gdiResource = D3dDdi::Device::getGdiResource();
-				D3dDdi::Device::setGdiResourceHandle(nullptr);
 
 				g_bpp = Win32::DisplayMode::getBpp();
 				g_width = g_bounds.right - g_bounds.left;
@@ -304,17 +291,17 @@ namespace Gdi
 					g_surfaceView = nullptr;
 				}
 
-				if (g_isFullscreen && size == g_lastFullscreenSurfaceSize)
+				if (g_fullscreenPrimary && size == g_lastFullscreenSurfaceSize)
 				{
 					g_surfaceFileMapping = g_lastFullscreenSurfaceFileMapping;
 					g_surfaceView = g_lastFullscreenSurfaceView;
 				}
-				else if (g_isFullscreen || Config::gdiInterops.anyRedirects())
+				else if (g_fullscreenPrimary || Config::gdiInterops.anyRedirects())
 				{
 					g_surfaceFileMapping = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, size, nullptr);
 					g_surfaceView = MapViewOfFile(g_surfaceFileMapping, FILE_MAP_WRITE, 0, 0, 0);
 
-					if (g_isFullscreen)
+					if (g_fullscreenPrimary)
 					{
 						if (g_lastFullscreenSurfaceFileMapping)
 						{
@@ -335,11 +322,6 @@ namespace Gdi
 				for (auto& dc : g_dcs)
 				{
 					SelectObject(dc.first, createDib(dc.second.useDefaultPalette));
-				}
-
-				if (gdiResource)
-				{
-					D3dDdi::Device::setGdiResourceHandle(*gdiResource);
 				}
 
 				if (!Config::gdiInterops.anyRedirects())

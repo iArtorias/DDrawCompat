@@ -50,5 +50,6 @@ namespace DDraw
 
 	private:
 		void restoreOrigCaps(DWORD& caps);
+		void waitForFlip(CompatWeakPtr<IDirectDrawSurface7> surface);
 	};
 }

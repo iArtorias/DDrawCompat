@@ -2,13 +2,12 @@
 
 #include <ddraw.h>
 
-#include <Common/CompatRef.h>
-#include <Common/CompatVtable.h>
 #include <DDraw/Surfaces/SurfaceImpl.h>
-#include <DDraw/Types.h>
 
 namespace DDraw
 {
+	class PrimarySurface;
+
 	template <typename TSurface>
 	class PrimarySurfaceImpl : public SurfaceImpl<TSurface>
 	{
@@ -36,5 +35,8 @@ namespace DDraw
 		virtual HRESULT Restore(TSurface* This) override;
 		virtual HRESULT SetPalette(TSurface* This, LPDIRECTDRAWPALETTE lpDDPalette) override;
 		virtual HRESULT Unlock(TSurface* This, TUnlockParam lpRect) override;
+
+	private:
+		PrimarySurface& getPrimary() const { return *static_cast<PrimarySurface*>(this->m_data); }
 	};
 }

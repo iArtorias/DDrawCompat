@@ -2,6 +2,7 @@
 
 #include <Config/Settings/CompatFixes.h>
 #include <DDraw/DirectDraw.h>
+#include <DDraw/Surfaces/PrimarySurface.h>
 #include <DDraw/Surfaces/TagSurface.h>
 
 namespace
@@ -11,15 +12,10 @@ namespace
 
 namespace DDraw
 {
-	TagSurface::TagSurface(DWORD origFlags, DWORD origCaps, DDRAWI_DIRECTDRAW_LCL* ddLcl)
+	TagSurface::TagSurface(DWORD origFlags, const Caps& origCaps, DDRAWI_DIRECTDRAW_LCL* ddLcl)
 		: Surface(origFlags, origCaps)
-		, m_ddInt{}
-		, m_exclusiveOwnerThreadId(0)
-		, m_fullscreenWindow(nullptr)
-		, m_fullscreenWindowStyle(0)
-		, m_fullscreenWindowExStyle(0)
 	{
-		LOG_FUNC("TagSurface::TagSurface", Compat::hex(origFlags), Compat::hex(origCaps), ddLcl);
+		LOG_FUNC("TagSurface::TagSurface", Compat::hex(origFlags), static_cast<const DDSCAPS2&>(origCaps), ddLcl);
 		m_ddInt.lpVtbl = &CompatVtable<IDirectDraw>::s_origVtable;
 		m_ddInt.lpLcl = ddLcl;
 		m_ddInt.dwIntRefCnt = 1;
@@ -42,7 +38,7 @@ namespace DDraw
 		desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_SYSTEMMEMORY;
 
 		auto ddLcl = DDraw::DirectDraw::getInt(dd.get()).lpLcl;
-		auto privateData(std::make_unique<TagSurface>(desc.dwFlags, desc.ddsCaps.dwCaps, ddLcl));
+		auto privateData(std::make_unique<TagSurface>(desc.dwFlags, desc.ddsCaps, ddLcl));
 		g_ddObjects[ddLcl] = privateData.get();
 
 		IDirectDrawSurface* surface = nullptr;
@@ -50,6 +46,17 @@ namespace DDraw
 		const HRESULT result = Surface::create(dd, desc, surface, std::move(privateData));
 		s_inCreateSurface = false;
 		return result;
+	}
+
+	void TagSurface::enumTagSurfaces(std::function<bool(TagSurface&)> callback)
+	{
+		for (auto& pair : g_ddObjects)
+		{
+			if (!callback(*pair.second))
+			{
+				return;
+			}
+		}
 	}
 
 	TagSurface* TagSurface::findFullscreenWindow(HWND hwnd)
@@ -94,6 +101,28 @@ namespace DDraw
 	CompatPtr<IDirectDraw7> TagSurface::getDD()
 	{
 		return CompatPtr<IDirectDraw7>::from(reinterpret_cast<IDirectDraw*>(&m_ddInt));
+	}
+
+	PrimarySurface* TagSurface::getMainPrimary(bool fullscreen)
+	{
+		for (auto& pair : g_ddObjects)
+		{
+			if (pair.second->m_primary && static_cast<bool>(pair.second->m_fullscreenWindow) == fullscreen)
+			{
+				auto primary = pair.second->m_primary->getDDS();
+				if (SUCCEEDED(primary.get()->lpVtbl->IsLost(primary)))
+				{
+					return pair.second->m_primary;
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	PrimarySurface* TagSurface::getMainPrimary()
+	{
+		const auto primary = getMainPrimary(true);
+		return primary ? primary : getMainPrimary(false);
 	}
 
 	void TagSurface::setFullscreenWindow(HWND hwnd)

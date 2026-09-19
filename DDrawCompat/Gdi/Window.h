@@ -30,7 +30,7 @@ namespace Gdi
 		bool isTopLevelWindow(HWND hwnd);
 		void onStyleChanged(HWND hwnd, WPARAM wParam);
 		void present(CompatRef<IDirectDrawSurface7> dst, CompatRef<IDirectDrawSurface7> src,
-			CompatRef<IDirectDrawClipper> clipper);
+			CompatRef<IDirectDrawClipper> clipper, RECT monitorRect);
 		void present(Gdi::Region excludeRegion);
 		void redrawAll();
 		void setDpiAwareness(HWND hwnd, bool dpiAware);

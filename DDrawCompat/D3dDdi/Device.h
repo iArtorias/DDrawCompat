@@ -86,7 +86,8 @@ namespace D3dDdi
 		static Device* findDeviceByResource(HANDLE resource);
 		static Resource* findResource(HANDLE resource);
 		static Resource* getGdiResource();
-		static void setGdiResourceHandle(HANDLE resource);
+		static void setGdiResource();
+		static void setGdiResourceCreationInProgress(bool inProgress);
 		static void updateAllConfig();
 
 	private:

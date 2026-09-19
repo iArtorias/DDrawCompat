@@ -11,12 +11,12 @@
 #include <D3dDdi/ScopedCriticalSection.h>
 #include <DDraw/RealPrimarySurface.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
+#include <DDraw/Surfaces/TagSurface.h>
 #include <Gdi/Gdi.h>
 #include <Gdi/GuiThread.h>
 #include <Gdi/PresentationWindow.h>
 #include <Gdi/VirtualScreen.h>
 #include <Gdi/Window.h>
-#include <Gdi/WinProc.h>
 #include <Input/Input.h>
 #include <Overlay/ConfigWindow.h>
 #include <Overlay/StatsWindow.h>
@@ -426,7 +426,7 @@ namespace Gdi
 				if (window.isLayered && !window.visibleRegion.isEmpty())
 				{
 					auto visibleRegion(window.visibleRegion);
-					if (window.isDpiAware && DDraw::RealPrimarySurface::isFullscreen())
+					if (window.isDpiAware)
 					{
 						WINDOWINFO wi = {};
 						wi.cbSize = sizeof(wi);
@@ -560,16 +560,15 @@ namespace Gdi
 		}
 
 		void present(CompatRef<IDirectDrawSurface7> dst, CompatRef<IDirectDrawSurface7> src,
-			CompatRef<IDirectDrawClipper> clipper)
+			CompatRef<IDirectDrawClipper> clipper, RECT monitorRect)
 		{
 			D3dDdi::ScopedCriticalSection lock;
-			auto mr = DDraw::PrimarySurface::getMonitorInfo().rcEmulated;
 			for (auto window : g_windowZOrder)
 			{
 				if (window->presentationWindow && !window->visibleRegion.isEmpty())
 				{
 					clipper->SetHWnd(&clipper, 0, window->presentationWindow);
-					dst->Blt(&dst, &mr, &src, nullptr, DDBLT_WAIT, nullptr);
+					dst->Blt(&dst, &monitorRect, &src, nullptr, DDBLT_WAIT, nullptr);
 				}
 			}
 		}
@@ -719,7 +718,7 @@ namespace Gdi
 			if (it != g_windows.end())
 			{
 				it->second.layeredWindowContent.set(hwnd, hdcSrc, pptSrc, colorKey, alpha, alphaFormat);
-				if (DDraw::RealPrimarySurface::isFullscreen())
+				if (DDraw::TagSurface::findFullscreenWindow())
 				{
 					DDraw::RealPrimarySurface::scheduleOverlayUpdate();
 				}

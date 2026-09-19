@@ -33,6 +33,7 @@ namespace
 	D3DDDIFORMAT g_formatOverride = D3DDDIFMT_UNKNOWN;
 	std::pair<D3DDDIMULTISAMPLE_TYPE, UINT> g_msaaOverride = {};
 	bool g_readOnlyLock = false;
+	bool g_forcePointFilter = false;
 
 	LONG divCeil(LONG n, LONG d)
 	{
@@ -665,7 +666,7 @@ namespace D3dDdi
 	{
 		if (m_fixedData.Flags.MatchGdiPrimary)
 		{
-			auto& mi = DDraw::PrimarySurface::getMonitorInfo();
+			auto& mi = m_device.getAdapter().getMonitorInfo();
 			RECT r = DDraw::RealPrimarySurface::isExclusiveFullscreen() ? mi.rcReal : mi.rcDpiAware;
 			if (!IsRectEmpty(&r))
 			{
@@ -1028,7 +1029,7 @@ namespace D3dDdi
 			blt.DstSubResourceIndex = subResourceIndex;
 			blt.DstRect = getRect(subResourceIndex);
 			shaderBlt(blt, *this, *m_msaaResolvedSurface.resource, *m_msaaResolvedSurface.resource,
-				Config::Settings::ResolutionScaleFilter::BILINEAR == Config::resolutionScaleFilter.get()
+				(Config::Settings::ResolutionScaleFilter::BILINEAR == Config::resolutionScaleFilter.get() && !g_forcePointFilter)
 				? D3DTEXF_LINEAR | D3DTEXF_SRGB
 				: D3DTEXF_POINT);
 		}
@@ -1094,7 +1095,9 @@ namespace D3dDdi
 			m_msaaSurface.resource && *m_msaaSurface.resource == resource ||
 			m_msaaResolvedSurface.resource && *m_msaaResolvedSurface.resource == resource)
 		{
+			g_forcePointFilter = true;
 			loadSysMemResource(0);
+			g_forcePointFilter = false;
 			m_msaaSurface.resource = nullptr;
 			m_msaaResolvedSurface.resource = nullptr;
 		}
@@ -1518,7 +1521,7 @@ namespace D3dDdi
 		m_gdiRect = {};
 
 		const auto bounds = Gdi::VirtualScreen::getBounds();
-		const auto primaryRect = DDraw::PrimarySurface::getMonitorInfo().rcEmulated;
+		const auto primaryRect = m_device.getAdapter().getMonitorInfo().rcEmulated;
 		const auto desc = Gdi::VirtualScreen::getSurfaceDesc(m_useFullGdiSurface ? bounds : primaryRect);
 		if (!isGdiResource || !desc.lpSurface || m_formatInfo.bitsPerPixel != desc.ddpfPixelFormat.dwRGBBitCount)
 		{
@@ -1766,15 +1769,6 @@ namespace D3dDdi
 			m_isOversized || srcResource.m_isOversized)
 		{
 			return true;
-		}
-
-		if (m_handle == DDraw::PrimarySurface::getFrontResource())
-		{
-			auto origCaps = DDraw::PrimarySurface::getOrigCaps();
-			if ((origCaps & DDSCAPS_SYSTEMMEMORY) && !(origCaps & DDSCAPS_FLIP))
-			{
-				return true;
-			}
 		}
 
 		if (srcResource.m_lockResource && (srcResource.m_lockData[data.SrcSubResourceIndex].isMsaaUpToDate ||

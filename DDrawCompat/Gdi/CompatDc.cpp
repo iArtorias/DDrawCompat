@@ -3,7 +3,6 @@
 #include <D3dDdi/ScopedCriticalSection.h>
 #include <D3dDdi/SurfaceRepository.h>
 #include <DDraw/RealPrimarySurface.h>
-#include <DDraw/Surfaces/PrimarySurface.h>
 #include <Gdi/CompatDc.h>
 #include <Gdi/Dc.h>
 
@@ -44,8 +43,7 @@ namespace Gdi
 		if (m_compatDc != m_origDc)
 		{
 			D3dDdi::ScopedCriticalSection lock;
-			auto gdiResource = D3dDdi::Device::getGdiResource();
-			if (!m_isReadOnly && (!gdiResource || DDraw::PrimarySurface::getFrontResource() == *gdiResource))
+			if (!m_isReadOnly)
 			{
 				DDraw::RealPrimarySurface::scheduleUpdateWithPresentDelay();
 			}

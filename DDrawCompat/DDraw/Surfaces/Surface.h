@@ -17,13 +17,31 @@ namespace DDraw
 	class Surface
 	{
 	public:
+		struct Caps : DDSCAPS2
+		{
+			Caps()
+			{
+				static_cast<DDSCAPS2&>(*this) = {};
+			}
+
+			Caps(const DDSCAPS& caps) : Caps()
+			{
+				dwCaps = caps.dwCaps;
+			}
+
+			Caps(const DDSCAPS2& caps)
+			{
+				static_cast<DDSCAPS2&>(*this) = caps;
+			}
+		};
+
 		static const DWORD ALIGNMENT = 32;
 
 		virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, LPVOID*);
 		virtual ULONG STDMETHODCALLTYPE AddRef();
 		virtual ULONG STDMETHODCALLTYPE Release();
 
-		Surface(DWORD origFlags, DWORD origCaps);
+		Surface(DWORD origFlags, const Caps& origCaps);
 		virtual ~Surface();
 
 		static void* alignBuffer(void* buffer);
@@ -33,19 +51,20 @@ namespace DDraw
 			CompatRef<TDirectDraw> dd, TSurfaceDesc desc, TSurface*& surface, std::unique_ptr<Surface> privateData);
 
 		static void enumSurfaces(const std::function<void(Surface&)>& callback);
-		static DDSCAPS2 getCurrentSurfaceCaps();
+		static const DDSCAPS2& getCurrentSurfaceCaps();
+		static void setCurrentSurfaceCaps(const Caps& caps);
 
 		template <typename TSurface>
 		static Surface* getSurface(TSurface& dds);
 
 		CompatWeakPtr<IDirectDrawSurface7> getDDS() const { return m_surface; };
-		DWORD getOrigCaps() const { return m_origCaps; }
+		const DDSCAPS2& getOrigCaps() const { return m_origCaps; }
 
 		template <typename TSurface>
 		SurfaceImpl<TSurface>* getImpl() const;
 
 		bool isPrimary() const { return m_isPrimary; }
-		virtual void restore();
+		virtual void onRestore();
 
 		void setAsPrimary() { m_isPrimary = true; }
 		void setSizeOverride(DWORD width, DWORD height);
@@ -70,7 +89,7 @@ namespace DDraw
 		friend class SurfaceImpl;
 
 		DWORD m_origFlags;
-		DWORD m_origCaps;
+		DDSCAPS2 m_origCaps;
 		DWORD m_refCount;
 		SIZE m_sizeOverride;
 		std::unique_ptr<void, void(*)(void*)> m_sysMemBuffer;

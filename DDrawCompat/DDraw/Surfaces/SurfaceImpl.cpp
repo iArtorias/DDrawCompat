@@ -1,12 +1,11 @@
-#include <set>
 #include <type_traits>
 
 #include <d3d.h>
-#include <d3dumddi.h>
 
 #include <Common/CompatPtr.h>
 #include <Config/Settings/CompatFixes.h>
 #include <Config/Settings/SupportedDevices.h>
+#include <D3dDdi/Adapter.h>
 #include <D3dDdi/Device.h>
 #include <D3dDdi/Resource.h>
 #include <DDraw/DirectDrawSurface.h>
@@ -15,6 +14,7 @@
 #include <DDraw/Surfaces/PrimarySurface.h>
 #include <DDraw/Surfaces/Surface.h>
 #include <DDraw/Surfaces/SurfaceImpl.h>
+#include <DDraw/Surfaces/TagSurface.h>
 #include <Direct3d/Direct3d.h>
 #include <Dll/Dll.h>
 #include <Gdi/Region.h>
@@ -29,7 +29,7 @@ namespace
 		return clipper;
 	}
 
-	IDirectDrawClipper* getFixedClipper(CompatWeakPtr<IDirectDrawClipper> clipper)
+	IDirectDrawClipper* getFixedClipper(CompatWeakPtr<IDirectDrawClipper> clipper, const RECT& monitorRect)
 	{
 		HWND hwnd = nullptr;
 		clipper->GetHWnd(clipper, &hwnd);
@@ -49,10 +49,9 @@ namespace
 		GetRandomRgn(dc, rgn, SYSRGN);
 		CALL_ORIG_FUNC(ReleaseDC)(hwnd, dc);
 
-		auto& mi = DDraw::PrimarySurface::getMonitorInfo();
-		if (0 != mi.rcEmulated.left || 0 != mi.rcEmulated.top)
+		if (0 != monitorRect.left || 0 != monitorRect.top)
 		{
-			rgn.offset(-mi.rcEmulated.left, -mi.rcEmulated.top);
+			rgn.offset(-monitorRect.left, -monitorRect.top);
 		}
 
 		DWORD rgnSize = GetRegionData(rgn, 0, nullptr);
@@ -80,7 +79,14 @@ namespace
 				return;
 			}
 
-			auto fixedClipper = getFixedClipper(m_clipper);
+			RECT monitorRect = {};
+			auto resource = D3dDdi::Device::findDeviceByResource(DDraw::DirectDrawSurface::getDriverResourceHandle(*surface));
+			if (resource)
+			{
+				monitorRect = resource->getAdapter().getMonitorInfo().rcEmulated;
+			}
+
+			auto fixedClipper = getFixedClipper(m_clipper, monitorRect);
 			if (!fixedClipper)
 			{
 				m_clipper.release();
@@ -153,7 +159,7 @@ namespace DDraw
 		DWORD dwFlags, LPDDBLTFX lpDDBltFx)
 	{
 		Gdi::WinProc::startFrame();
-		RealPrimarySurface::waitForFlip(m_data->getDDS());
+		waitForFlip(m_data->getDDS());
 		ClipperFix fix(This);
 		return blt(This, lpDDSrcSurface, lpSrcRect, [=](TSurface* This, TSurface* lpDDSrcSurface, LPRECT lpSrcRect)
 			{ return getOrigVtable(This).Blt(This, lpDestRect, lpDDSrcSurface, lpSrcRect, dwFlags, lpDDBltFx); });
@@ -164,7 +170,7 @@ namespace DDraw
 		TSurface* This, DWORD dwX, DWORD dwY, TSurface* lpDDSrcSurface, LPRECT lpSrcRect, DWORD dwTrans)
 	{
 		Gdi::WinProc::startFrame();
-		RealPrimarySurface::waitForFlip(m_data->getDDS());
+		waitForFlip(m_data->getDDS());
 		return blt(This, lpDDSrcSurface, lpSrcRect, [=](TSurface* This, TSurface* lpDDSrcSurface, LPRECT lpSrcRect)
 			{ return getOrigVtable(This).BltFast(This, dwX, dwY, lpDDSrcSurface, lpSrcRect, dwTrans); });
 	}
@@ -181,7 +187,7 @@ namespace DDraw
 		TDdsCaps caps = {};
 		if (lpDDSCaps && (lpDDSCaps->dwCaps & DDSCAPS_3DDEVICE) &&
 			SUCCEEDED(getOrigVtable(This).GetCaps(This, &caps)) &&
-			!(caps.dwCaps & DDSCAPS_3DDEVICE) && (m_data->m_origCaps & DDSCAPS_3DDEVICE))
+			!(caps.dwCaps & DDSCAPS_3DDEVICE) && (m_data->m_origCaps.dwCaps & DDSCAPS_3DDEVICE))
 		{
 			caps = *lpDDSCaps;
 			caps.dwCaps &= ~DDSCAPS_3DDEVICE;
@@ -205,9 +211,9 @@ namespace DDraw
 	HRESULT SurfaceImpl<TSurface>::GetDC(TSurface* This, HDC* lphDC)
 	{
 		Gdi::WinProc::startFrame();
-		RealPrimarySurface::waitForFlip(m_data->getDDS());
+		waitForFlip(m_data->getDDS());
 		HRESULT result = getOrigVtable(This).GetDC(This, lphDC);
-		if (SUCCEEDED(result) && !(m_data->m_origCaps & DDSCAPS_OWNDC))
+		if (SUCCEEDED(result) && !(m_data->m_origCaps.dwCaps & DDSCAPS_OWNDC))
 		{
 			Dll::g_origProcs.ReleaseDDThreadLock();
 		}
@@ -256,7 +262,7 @@ namespace DDraw
 		DWORD dwFlags, HANDLE hEvent)
 	{
 		Gdi::WinProc::startFrame();
-		RealPrimarySurface::waitForFlip(m_data->getDDS());
+		waitForFlip(m_data->getDDS());
 		if (Config::compatFixes.get().nosyslock)
 		{
 			dwFlags |= DDLOCK_NOSYSLOCK;
@@ -294,7 +300,7 @@ namespace DDraw
 	HRESULT SurfaceImpl<TSurface>::ReleaseDC(TSurface* This, HDC hDC)
 	{
 		HRESULT result = getOrigVtable(This).ReleaseDC(This, hDC);
-		if (SUCCEEDED(result) && !(m_data->m_origCaps & DDSCAPS_OWNDC))
+		if (SUCCEEDED(result) && !(m_data->m_origCaps.dwCaps & DDSCAPS_OWNDC))
 		{
 			Dll::g_origProcs.AcquireDDThreadLock();
 		}
@@ -304,10 +310,12 @@ namespace DDraw
 	template <typename TSurface>
 	HRESULT SurfaceImpl<TSurface>::Restore(TSurface* This)
 	{
+		Surface::setCurrentSurfaceCaps(m_data->getOrigCaps());
 		HRESULT result = getOrigVtable(This).Restore(This);
+		Surface::setCurrentSurfaceCaps({});
 		if (SUCCEEDED(result))
 		{
-			m_data->restore();
+			m_data->onRestore();
 		}
 		return result;
 	}
@@ -345,7 +353,22 @@ namespace DDraw
 	template <typename TSurface>
 	void SurfaceImpl<TSurface>::restoreOrigCaps(DWORD& caps)
 	{
-		caps |= m_data->m_origCaps & DDSCAPS_3DDEVICE;
+		caps |= m_data->m_origCaps.dwCaps & DDSCAPS_3DDEVICE;
+	}
+
+	template <typename TSurface>
+	void SurfaceImpl<TSurface>::waitForFlip(CompatWeakPtr<IDirectDrawSurface7> surface)
+	{
+		auto tagSurface = TagSurface::findFullscreenWindow();
+		if (tagSurface)
+		{
+			auto primary = tagSurface->getPrimary();
+			auto realPrimary = primary ? primary->getRealPrimary() : nullptr;
+			if (realPrimary)
+			{
+				realPrimary->waitForFlip(surface);
+			}
+		}
 	}
 
 	template SurfaceImpl<IDirectDrawSurface>;

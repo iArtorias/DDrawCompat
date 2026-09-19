@@ -6,6 +6,7 @@
 #include <DDraw/DirectDrawPalette.h>
 #include <DDraw/ScopedThreadLock.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
+#include <DDraw/Surfaces/TagSurface.h>
 #include <DDraw/Visitors/DirectDrawPaletteVtblVisitor.h>
 
 namespace
@@ -18,16 +19,27 @@ namespace
 			LOG_DEBUG << Compat::array(lpEntries, dwCount);
 		}
 
-		if (This == DDraw::PrimarySurface::s_palette)
+		DDraw::PrimarySurface* primary = nullptr;
+		DDraw::TagSurface::enumTagSurfaces([&](DDraw::TagSurface& tagSurface)
+			{
+				if (tagSurface.getPrimary() && tagSurface.getPrimary()->getPalette() == This)
+				{
+					primary = tagSurface.getPrimary();
+					return false;
+				}
+				return true;
+			});
+
+		if (primary)
 		{
 			DDraw::DirectDrawPalette::waitForNextUpdate();
 		}
 
 		HRESULT result = getOrigVtable(This).SetEntries(
 			This, dwFlags, dwStartingEntry, dwCount, lpEntries);
-		if (SUCCEEDED(result) && This == DDraw::PrimarySurface::s_palette)
+		if (SUCCEEDED(result) && primary)
 		{
-			DDraw::PrimarySurface::updatePalette();
+			primary->updatePalette();
 		}
 		return result;
 	}

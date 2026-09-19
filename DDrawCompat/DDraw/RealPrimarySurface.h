@@ -8,35 +8,48 @@
 
 namespace DDraw
 {
+	class PrimarySurface;
 	class Surface;
 
 	class RealPrimarySurface
 	{
 	public:
-		static HRESULT create(CompatRef<IDirectDraw> dd);
-		static void flip(CompatPtr<IDirectDrawSurface7> surfaceTargetOverride, DWORD flags);
+		RealPrimarySurface(CompatRef<IDirectDraw> dd, PrimarySurface& primary);
+
+		void flip(CompatPtr<IDirectDrawSurface7> surfaceTargetOverride, DWORD flags);
+		CompatPtr<IDirectDrawSurface7> getBackBuffer();
+		HWND getDeviceWindow() { return m_deviceWindow; }
+		HWND* getDeviceWindowPtr() { return m_deviceWindowPtr; }
+		HRESULT getGammaRamp(DDGAMMARAMP* rampData);
+		CompatPtr<IDirectDrawSurface7> getLastSurface();
+		CompatWeakPtr<IDirectDrawSurface7> getSurface();
+		bool isFullscreen();
+		bool isLost();
+		HRESULT setGammaRamp(DDGAMMARAMP* rampData);
+		void waitForFlip(CompatWeakPtr<IDirectDrawSurface7> surface);
+
 		static int flush();
 		static Config::AtomicSetting getFpsLimiter();
-		static HRESULT getGammaRamp(DDGAMMARAMP* rampData);
 		static HWND getPresentationWindow();
-		static CompatWeakPtr<IDirectDrawSurface7> getSurface();
 		static HWND getTopmost();
 		static void init();
 		static bool isExclusiveFullscreen();
-		static bool isFullscreen();
-		static bool isLost();
 		static bool isProcessActive();
-		static void release();
-		static HRESULT restore();
 		static void scheduleOverlayUpdate();
 		static void scheduleUpdate(bool allowFlush = false);
 		static void scheduleUpdateWithPresentDelay(bool allowFlush = false);
-		static HRESULT setGammaRamp(DDGAMMARAMP* rampData);
 		static void setPresentationWindowTopmost();
 		static void setUpdateReady();
 		static void suppressLost(bool suppress);
 		static void updateFpsLimiter();
-		static void waitForFlip(CompatWeakPtr<IDirectDrawSurface7> surface);
 		static void waitForFlipFpsLimit(unsigned fpsLimit, bool doFlush = true);
+
+	private:
+		PrimarySurface& m_primary;
+		CompatPtr<IDirectDrawSurface7> m_frontBuffer;
+		HWND m_deviceWindow = nullptr;
+		HWND* m_deviceWindowPtr = nullptr;
+		Surface* m_lastFlipSurface = nullptr;
+		bool m_isFullscreen = false;
 	};
 }

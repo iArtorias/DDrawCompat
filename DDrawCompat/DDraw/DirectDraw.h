@@ -1,17 +1,18 @@
 #pragma once
 
-#include <functional>
 #include <type_traits>
 
 #include <ddraw.h>
 #include <ddrawi.h>
 
-#include <Common/CompatPtr.h>
 #include <Common/CompatRef.h>
 #include <D3dDdi/Device.h>
+#include <DDraw/Surfaces/TagSurface.h>
 
 namespace DDraw
 {
+	class PrimarySurface;
+
 	namespace DirectDraw
 	{
 		template <typename TSurface>
@@ -43,6 +44,13 @@ namespace DDraw
 		HWND* getDeviceWindowPtr(TDirectDraw& dd)
 		{
 			return reinterpret_cast<HWND*>(&getInt(dd).lpLcl->hWnd);
+		}
+
+		template <typename TDirectDraw>
+		PrimarySurface* getPrimary(TDirectDraw& dd)
+		{
+			auto tagSurface = TagSurface::get(getInt(dd).lpLcl);
+			return tagSurface ? tagSurface->getPrimary() : nullptr;
 		}
 
 		template <typename Vtable>

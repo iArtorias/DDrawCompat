@@ -18,7 +18,7 @@ DEFINE_GUID(IID_CompatSurfacePrivateData,
 
 namespace
 {
-	DDSCAPS2 g_currentSurfaceCaps = {};
+	DDraw::Surface::Caps g_currentSurfaceCaps = {};
 	std::set<DDraw::Surface*> g_surfaces;
 
 	void heapFree(void* p)
@@ -56,7 +56,7 @@ namespace DDraw
 		return refCount;
 	}
 
-	Surface::Surface(DWORD origFlags, DWORD origCaps)
+	Surface::Surface(DWORD origFlags, const Caps& origCaps)
 		: m_origFlags(origFlags)
 		, m_origCaps(origCaps)
 		, m_refCount(0)
@@ -116,7 +116,7 @@ namespace DDraw
 			desc.ddsCaps.dwCaps &= ~DDSCAPS_SYSTEMMEMORY;
 		}
 
-		memcpy(&g_currentSurfaceCaps, &desc.ddsCaps, sizeof(desc.ddsCaps));
+		g_currentSurfaceCaps = desc.ddsCaps;
 		HRESULT result = dd->CreateSurface(&dd, &desc, &surface, nullptr);
 		g_currentSurfaceCaps = {};
 		if (FAILED(result))
@@ -205,13 +205,15 @@ namespace DDraw
 		desc.dwFlags = DDSD_LPSURFACE;
 		desc.lpSurface = alignBuffer(
 			static_cast<BYTE*>(m_sysMemBuffer.get()) + desc.lPitch * Config::surfacePatches.getTopRows(origHeight));
+		g_currentSurfaceCaps = m_origCaps;
 		if (FAILED(surface->SetSurfaceDesc(&surface, &desc, 0)))
 		{
 			m_sysMemBuffer.reset();
 		}
+		g_currentSurfaceCaps = {};
 	}
 
-	DDSCAPS2 Surface::getCurrentSurfaceCaps()
+	const DDSCAPS2& Surface::getCurrentSurfaceCaps()
 	{
 		return g_currentSurfaceCaps;
 	}
@@ -247,8 +249,13 @@ namespace DDraw
 	template Surface* Surface::getSurface(IDirectDrawSurface4& dds);
 	template Surface* Surface::getSurface(IDirectDrawSurface7& dds);
 
-	void Surface::restore()
+	void Surface::onRestore()
 	{
+	}
+
+	void Surface::setCurrentSurfaceCaps(const Caps& caps)
+	{
+		g_currentSurfaceCaps = caps;
 	}
 
 	void Surface::setSizeOverride(DWORD width, DWORD height)

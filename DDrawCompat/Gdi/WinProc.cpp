@@ -824,7 +824,7 @@ namespace
 	{
 		LOG_FUNC("SetLayeredWindowAttributes", hwnd, crKey, bAlpha, dwFlags);
 		BOOL result = CALL_ORIG_FUNC(SetLayeredWindowAttributes)(hwnd, crKey, bAlpha, dwFlags);
-		if (result && DDraw::RealPrimarySurface::isFullscreen())
+		if (result && DDraw::TagSurface::findFullscreenWindow())
 		{
 			DDraw::RealPrimarySurface::scheduleOverlayUpdate();
 		}

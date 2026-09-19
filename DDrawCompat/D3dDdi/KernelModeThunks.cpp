@@ -21,6 +21,7 @@
 #include <DDraw/RealPrimarySurface.h>
 #include <DDraw/ScopedThreadLock.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
+#include <DDraw/Surfaces/TagSurface.h>
 #include <Gdi/GuiThread.h>
 #include <Gdi/Palette.h>
 #include <Overlay/StatsWindow.h>
@@ -69,6 +70,27 @@ namespace
 		return D3DKMTCloseAdapter(pData);
 	}
 
+	bool isComplexPrimaryFrontResource(void* lockPtr)
+	{
+		bool result = false;
+		DDraw::TagSurface::enumTagSurfaces([&](DDraw::TagSurface& tagSurface)
+			{
+				auto primary = tagSurface.getPrimary();
+				if (primary)
+				{
+					auto primaryResource = D3dDdi::Device::findResource(primary->getFrontResource());
+					if (primaryResource && primaryResource->getLockPtr(0) == lockPtr &&
+						(primary->getOrigCaps() & DDSCAPS_COMPLEX))
+					{
+						result = true;
+						return false;
+					}
+				}
+				return true;
+			});
+		return result;
+	}
+
 	NTSTATUS APIENTRY createDcFromMemory(D3DKMT_CREATEDCFROMMEMORY* pData)
 	{
 		LOG_FUNC("D3DKMTCreateDCFromMemory", pData);
@@ -86,9 +108,7 @@ namespace
 		{
 			DDraw::ScopedThreadLock ddLock;
 			D3dDdi::ScopedCriticalSection driverLock;
-			auto primaryResource = D3dDdi::Device::findResource(DDraw::PrimarySurface::getFrontResource());
-			if (primaryResource && pData->pMemory == primaryResource->getLockPtr(0) &&
-				(DDraw::PrimarySurface::getOrigCaps() & DDSCAPS_COMPLEX))
+			if (isComplexPrimaryFrontResource(pData->pMemory))
 			{
 				pData->pColorTable = Gdi::Palette::getDefaultPalette();
 			}

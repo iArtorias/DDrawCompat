@@ -2,7 +2,8 @@
 #include <Config/Settings/PresentDelay.h>
 #include <Config/Settings/FpsLimiter.h>
 #include <Config/Settings/GdiInterops.h>
-#include <D3dDdi/KernelModeThunks.h>
+#include <D3dDdi/Device.h>
+#include <D3dDdi/Resource.h>
 #include <D3dDdi/ScopedCriticalSection.h>
 #include <DDraw/DirectDrawClipper.h>
 #include <DDraw/DirectDrawPalette.h>
@@ -21,13 +22,8 @@ namespace
 {
 	template <typename TSurface>
 	void bltToGdi(TSurface* This, LPRECT lpDestRect, TSurface* lpDDSrcSurface, LPRECT lpSrcRect,
-		DWORD dwFlags, LPDDBLTFX lpDDBltFx)
+		DWORD dwFlags, LPDDBLTFX lpDDBltFx, const RECT& monitorRect)
 	{
-		if (!lpDestRect || DDraw::RealPrimarySurface::isFullscreen())
-		{
-			return;
-		}
-
 		CompatPtr<IDirectDrawClipper> clipper;
 		CompatVtable<Vtable<TSurface>>::s_origVtable.GetClipper(This, &clipper.getRef());
 		if (!clipper)
@@ -37,7 +33,6 @@ namespace
 
 		D3dDdi::ScopedCriticalSection lock;
 		Gdi::Region clipRgn(DDraw::DirectDrawClipper::getClipRgn(*clipper));
-		RECT monitorRect = DDraw::PrimarySurface::getMonitorInfo().rcEmulated;
 		RECT virtualScreenBounds = Gdi::VirtualScreen::getBounds();
 		clipRgn.offset(monitorRect.left, monitorRect.top);
 		clipRgn &= virtualScreenBounds;
@@ -47,7 +42,19 @@ namespace
 			return;
 		}
 
-		auto gdiSurface(Gdi::VirtualScreen::createSurface(virtualScreenBounds));
+		auto repo = DDraw::DirectDrawSurface::getSurfaceRepository(*This);
+		if (!repo)
+		{
+			return;
+		}
+
+		auto dd(repo->getDirectDraw());
+		if (!dd)
+		{
+			return;
+		}
+
+		auto gdiSurface(Gdi::VirtualScreen::createSurface(dd, virtualScreenBounds));
 		if (!gdiSurface)
 		{
 			return;
@@ -71,30 +78,29 @@ namespace
 		gdiSurface->SetClipper(gdiSurface, nullptr);
 	}
 
-	bool isFsBlt(int cx, int cy)
+	bool isFsBlt(const RECT& monitorRect, int cx, int cy)
 	{
-		RECT monitorRect = DDraw::PrimarySurface::getMonitorInfo().rcEmulated;
 		return monitorRect.right - monitorRect.left == cx &&
 			monitorRect.bottom - monitorRect.top == cy;
 	}
 
-	bool isFsBlt(LPRECT lpDestRect)
+	bool isFsBlt(const RECT& monitorRect, LPRECT lpDestRect)
 	{
 		return !lpDestRect || 0 == lpDestRect->left && 0 == lpDestRect->top &&
-			isFsBlt(lpDestRect->right, lpDestRect->bottom);
+			isFsBlt(monitorRect, lpDestRect->right, lpDestRect->bottom);
 	}
 
-	bool isFsBlt(int& cache, LPRECT lpDestRect)
+	bool isFsBlt(int& cache, const RECT& monitorRect, LPRECT lpDestRect)
 	{
 		if (0 == cache)
 		{
-			cache = isFsBlt(lpDestRect) ? 1 : -1;
+			cache = isFsBlt(monitorRect, lpDestRect) ? 1 : -1;
 		}
 		return 1 == cache;
 	}
 
 	template <typename TSurface>
-	bool isFsBltFast(DWORD dwX, DWORD dwY, TSurface* lpDDSrcSurface, LPRECT lpSrcRect)
+	bool isFsBltFast(const RECT& monitorRect, DWORD dwX, DWORD dwY, TSurface* lpDDSrcSurface, LPRECT lpSrcRect)
 	{
 		if (0 != dwX || 0 != dwY || !lpDDSrcSurface)
 		{
@@ -103,21 +109,21 @@ namespace
 
 		if (lpSrcRect)
 		{
-			return isFsBlt(lpSrcRect->right - lpSrcRect->left, lpSrcRect->bottom - lpSrcRect->top);
+			return isFsBlt(monitorRect, lpSrcRect->right - lpSrcRect->left, lpSrcRect->bottom - lpSrcRect->top);
 		}
 
 		typename DDraw::Types<TSurface>::TSurfaceDesc desc = {};
 		desc.dwSize = sizeof(desc);
 		getOrigVtable(lpDDSrcSurface).GetSurfaceDesc(lpDDSrcSurface, &desc);
-		return isFsBlt(desc.dwWidth, desc.dwHeight);
+		return isFsBlt(monitorRect, desc.dwWidth, desc.dwHeight);
 	}
 
 	template <typename TSurface>
-	bool isFsBltFast(int& cache, DWORD dwX, DWORD dwY, TSurface* lpDDSrcSurface, LPRECT lpSrcRect)
+	bool isFsBltFast(int& cache, const RECT& monitorRect, DWORD dwX, DWORD dwY, TSurface* lpDDSrcSurface, LPRECT lpSrcRect)
 	{
 		if (0 == cache)
 		{
-			cache = isFsBltFast(dwX, dwY, lpDDSrcSurface, lpSrcRect) ? 1 : -1;
+			cache = isFsBltFast(monitorRect, dwX, dwY, lpDDSrcSurface, lpSrcRect) ? 1 : -1;
 		}
 		return 1 == cache;
 	}
@@ -141,13 +147,13 @@ namespace DDraw
 	HRESULT PrimarySurfaceImpl<TSurface>::AddAttachedSurface(TSurface* This, TSurface* lpDDSAttachedSurface)
 	{
 		HRESULT result = getOrigVtable(This).AddAttachedSurface(This, lpDDSAttachedSurface);
-		if (SUCCEEDED(result) && !(PrimarySurface::getOrigCaps() & DDSCAPS_3DDEVICE))
+		if (SUCCEEDED(result) && !(getPrimary().getOrigCaps() & DDSCAPS_3DDEVICE))
 		{
 			TDdsCaps caps = {};
 			getOrigVtable(This).GetCaps(lpDDSAttachedSurface, &caps);
 			if (caps.dwCaps & DDSCAPS_3DDEVICE)
 			{
-				PrimarySurface::setAsRenderTarget();
+				getPrimary().setAsRenderTarget();
 			}
 		}
 		return result;
@@ -158,7 +164,7 @@ namespace DDraw
 		TSurface* This, LPRECT lpDestRect, TSurface* lpDDSrcSurface, LPRECT lpSrcRect,
 		DWORD dwFlags, LPDDBLTFX lpDDBltFx)
 	{
-		if (RealPrimarySurface::isLost())
+		if (FAILED(IsLost(This)))
 		{
 			return DDERR_SURFACELOST;
 		}
@@ -166,7 +172,8 @@ namespace DDraw
 		RealPrimarySurface::flush();
 		const auto fpsLimiter = RealPrimarySurface::getFpsLimiter();
 		int isFsBltCache = 0;
-		if (Config::Settings::FpsLimiter::FLIPSTART == fpsLimiter.value && isFsBlt(isFsBltCache, lpDestRect))
+		if (Config::Settings::FpsLimiter::FLIPSTART == fpsLimiter.value &&
+			isFsBlt(isFsBltCache, getPrimary().getMonitorInfo().rcEmulated, lpDestRect))
 		{
 			RealPrimarySurface::waitForFlipFpsLimit(fpsLimiter.param);
 		}
@@ -183,27 +190,27 @@ namespace DDraw
 			isRedirected = !hwnd || Gdi::isRedirected(hwnd);
 		}
 
-		if (isRedirected || !RealPrimarySurface::isFullscreen())
+		auto realPrimary = getPrimary().getRealPrimary();
+		if (isRedirected || !realPrimary->isFullscreen())
 		{
 			result = SurfaceImpl<TSurface>::Blt(This, lpDestRect, lpDDSrcSurface, lpSrcRect, dwFlags, lpDDBltFx);
 		}
 
 		if (!isRedirected)
 		{
-			auto realPrimary(RealPrimarySurface::getSurface());
-			CompatPtr<IDirectDrawClipper> realClipper;
-			realPrimary->GetClipper(realPrimary, &realClipper.getRef());
-			realPrimary->SetClipper(realPrimary, clipper);
+			auto realPrimarySurface(realPrimary->getSurface());
+			realPrimarySurface->SetClipper(realPrimarySurface, clipper);
 			auto src(CompatPtr<IDirectDrawSurface7>::from(lpDDSrcSurface));
-			result = realPrimary->Blt(realPrimary, lpDestRect, src, lpSrcRect, dwFlags, lpDDBltFx);
-			realPrimary->SetClipper(realPrimary, realClipper);
+			result = realPrimarySurface->Blt(realPrimarySurface, lpDestRect, src, lpSrcRect, dwFlags, lpDDBltFx);
 		}
 
 		if (SUCCEEDED(result))
 		{
-			if (isRedirected && Config::gdiInterops.anyRedirects())
+			if (isRedirected && Config::gdiInterops.anyRedirects() &&
+				lpDestRect && !realPrimary->isFullscreen())
 			{
-				bltToGdi(This, lpDestRect, lpDDSrcSurface, lpSrcRect, dwFlags, lpDDBltFx);
+				bltToGdi(This, lpDestRect, lpDDSrcSurface, lpSrcRect, dwFlags, lpDDBltFx,
+					getPrimary().getMonitorInfo().rcEmulated);
 			}
 
 			auto statsWindow = Gdi::GuiThread::getStatsWindow();
@@ -213,7 +220,7 @@ namespace DDraw
 			}
 
 			if (Config::Settings::PresentDelay::AUTO == Config::presentDelay.get() &&
-				isFsBlt(isFsBltCache, lpDestRect))
+				isFsBlt(isFsBltCache, getPrimary().getMonitorInfo().rcEmulated, lpDestRect))
 			{
 				RealPrimarySurface::scheduleUpdate(true);
 			}
@@ -223,7 +230,8 @@ namespace DDraw
 			}
 		}
 
-		if (Config::Settings::FpsLimiter::FLIPEND == fpsLimiter.value && isFsBlt(isFsBltCache, lpDestRect))
+		if (Config::Settings::FpsLimiter::FLIPEND == fpsLimiter.value &&
+			isFsBlt(isFsBltCache, getPrimary().getMonitorInfo().rcEmulated, lpDestRect))
 		{
 			RealPrimarySurface::waitForFlipFpsLimit(fpsLimiter.param);
 		}
@@ -234,7 +242,7 @@ namespace DDraw
 	HRESULT PrimarySurfaceImpl<TSurface>::BltFast(
 		TSurface* This, DWORD dwX, DWORD dwY, TSurface* lpDDSrcSurface, LPRECT lpSrcRect, DWORD dwTrans)
 	{
-		if (RealPrimarySurface::isLost())
+		if (FAILED(IsLost(This)))
 		{
 			return DDERR_SURFACELOST;
 		}
@@ -243,7 +251,7 @@ namespace DDraw
 		const auto fpsLimiter = RealPrimarySurface::getFpsLimiter();
 		int isFsBltFastCache = 0;
 		if (Config::Settings::FpsLimiter::FLIPSTART == fpsLimiter.value
-			&& isFsBltFast(isFsBltFastCache, dwX, dwY, lpDDSrcSurface, lpSrcRect))
+			&& isFsBltFast(isFsBltFastCache, getPrimary().getMonitorInfo().rcEmulated, dwX, dwY, lpDDSrcSurface, lpSrcRect))
 		{
 			RealPrimarySurface::waitForFlipFpsLimit(fpsLimiter.param);
 		}
@@ -256,7 +264,7 @@ namespace DDraw
 				statsWindow->m_blit.add();
 			}
 			if (Config::Settings::PresentDelay::AUTO == Config::presentDelay.get() &&
-				isFsBltFast(isFsBltFastCache && dwX, dwY, lpDDSrcSurface, lpSrcRect))
+				isFsBltFast(isFsBltFastCache, getPrimary().getMonitorInfo().rcEmulated, dwX, dwY, lpDDSrcSurface, lpSrcRect))
 			{
 				RealPrimarySurface::scheduleUpdate(true);
 			}
@@ -266,7 +274,7 @@ namespace DDraw
 			}
 		}
 		if (Config::Settings::FpsLimiter::FLIPEND == fpsLimiter.value
-			&& isFsBltFast(isFsBltFastCache, dwX, dwY, lpDDSrcSurface, lpSrcRect))
+			&& isFsBltFast(isFsBltFastCache, getPrimary().getMonitorInfo().rcEmulated, dwX, dwY, lpDDSrcSurface, lpSrcRect))
 		{
 			RealPrimarySurface::waitForFlipFpsLimit(fpsLimiter.param);
 		}
@@ -276,19 +284,20 @@ namespace DDraw
 	template <typename TSurface>
 	HRESULT PrimarySurfaceImpl<TSurface>::Flip(TSurface* This, TSurface* lpDDSurfaceTargetOverride, DWORD dwFlags)
 	{
-		if (!RealPrimarySurface::isFullscreen())
-		{
-			return DDERR_NOEXCLUSIVEMODE;
-		}
-
-		if (FAILED(getOrigVtable(This).IsLost(This)))
+		if (FAILED(IsLost(This)))
 		{
 			return DDERR_SURFACELOST;
 		}
 
+		auto realPrimary = getPrimary().getRealPrimary();
+		if (!realPrimary->isFullscreen())
+		{
+			return DDERR_NOEXCLUSIVEMODE;
+		}
+
 		RealPrimarySurface::setUpdateReady();
 		RealPrimarySurface::flush();
-		RealPrimarySurface::waitForFlip(this->m_data->getDDS());
+		realPrimary->waitForFlip(this->m_data->getDDS());
 
 		const auto fpsLimiter = RealPrimarySurface::getFpsLimiter();
 		if (Config::Settings::FpsLimiter::FLIPSTART == fpsLimiter.value)
@@ -305,7 +314,7 @@ namespace DDraw
 			getOrigVtable(This).GetAttachedSurface(This, &caps, &surface.getRef());
 		}
 
-		const bool isFlipEmulated = 0 != (PrimarySurface::getOrigCaps() & DDSCAPS_SYSTEMMEMORY);
+		const bool isFlipEmulated = 0 != (getPrimary().getOrigCaps() & DDSCAPS_SYSTEMMEMORY);
 		if (isFlipEmulated)
 		{
 			HRESULT result = SurfaceImpl<TSurface>::Blt(This, nullptr, surface.get(), nullptr, DDBLT_WAIT, nullptr);
@@ -337,9 +346,9 @@ namespace DDraw
 			statsWindow->m_flip.add();
 		}
 
-		PrimarySurface::updateFrontResource();
-		RealPrimarySurface::flip(surfaceTargetOverride, dwFlags);
-		PrimarySurface::waitForIdle();
+		getPrimary().updateFrontResource();
+		realPrimary->flip(surfaceTargetOverride, dwFlags);
+		getPrimary().waitForIdle();
 
 		if (Config::Settings::FpsLimiter::FLIPEND == fpsLimiter.value)
 		{
@@ -351,7 +360,7 @@ namespace DDraw
 	template <typename TSurface>
 	HRESULT PrimarySurfaceImpl<TSurface>::GetAttachedSurface(TSurface* This, TDdsCaps* lpDDSCaps, TSurface** lplpDDAttachedSurface)
 	{
-		if (lpDDSCaps && (this->m_data->getOrigCaps() & DDSCAPS_SYSTEMMEMORY))
+		if (lpDDSCaps && (this->m_data->getOrigCaps().dwCaps & DDSCAPS_SYSTEMMEMORY))
 		{
 			TDdsCaps caps = *lpDDSCaps;
 			caps.dwCaps &= ~DDSCAPS_SYSTEMMEMORY;
@@ -374,7 +383,7 @@ namespace DDraw
 	template <typename TSurface>
 	HRESULT PrimarySurfaceImpl<TSurface>::GetDC(TSurface* This, HDC* lphDC)
 	{
-		if (RealPrimarySurface::isLost())
+		if (FAILED(IsLost(This)))
 		{
 			return DDERR_SURFACELOST;
 		}
@@ -410,7 +419,8 @@ namespace DDraw
 		HRESULT result = SurfaceImpl<TSurface>::IsLost(This);
 		if (SUCCEEDED(result))
 		{
-			result = RealPrimarySurface::isLost() ? DDERR_SURFACELOST : DD_OK;
+			auto realPrimary = getPrimary().getRealPrimary();
+			result = (!realPrimary || realPrimary->isLost()) ? DDERR_SURFACELOST : DD_OK;
 		}
 		return result;
 	}
@@ -420,7 +430,7 @@ namespace DDraw
 		TSurface* This, LPRECT lpDestRect, TSurfaceDesc* lpDDSurfaceDesc,
 		DWORD dwFlags, HANDLE hEvent)
 	{
-		if (RealPrimarySurface::isLost())
+		if (FAILED(IsLost(This)))
 		{
 			return DDERR_SURFACELOST;
 		}
@@ -457,11 +467,17 @@ namespace DDraw
 		HRESULT result = IsLost(This);
 		if (FAILED(result))
 		{
-			auto realPrimary = RealPrimarySurface::getSurface();
-			result = SUCCEEDED(realPrimary->IsLost(realPrimary)) ? DD_OK : RealPrimarySurface::restore();
+			auto realPrimary = getPrimary().getRealPrimary();
+			auto realPrimarySurface = realPrimary ? realPrimary->getSurface() : nullptr;
+			result = (realPrimarySurface && SUCCEEDED(realPrimarySurface->IsLost(realPrimarySurface)))
+				? DD_OK : getPrimary().resetRealPrimary();
 			if (SUCCEEDED(result))
 			{
-				return SurfaceImpl<TSurface>::Restore(This);
+				D3dDdi::Device::setGdiResourceCreationInProgress(true);
+				result = SurfaceImpl<TSurface>::Restore(This);
+				D3dDdi::Device::setGdiResourceCreationInProgress(false);
+				D3dDdi::Device::setGdiResource();
+				return result;
 			}
 		}
 		return result;
@@ -478,8 +494,8 @@ namespace DDraw
 		HRESULT result = SurfaceImpl<TSurface>::SetPalette(This, lpDDPalette);
 		if (SUCCEEDED(result))
 		{
-			PrimarySurface::s_palette = lpDDPalette;
-			PrimarySurface::updatePalette();
+			getPrimary().setPalette(lpDDPalette);
+			getPrimary().updatePalette();
 		}
 		return result;
 	}

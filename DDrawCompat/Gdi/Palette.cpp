@@ -3,12 +3,9 @@
 #include <Common/Hook.h>
 #include <Common/Log.h>
 #include <Common/ScopedSrwLock.h>
-#include <DDraw/RealPrimarySurface.h>
-#include <DDraw/Surfaces/PrimarySurface.h>
 #include <Gdi/Gdi.h>
 #include <Gdi/Palette.h>
 #include <Gdi/VirtualScreen.h>
-#include <Win32/DisplayMode.h>
 
 namespace
 {

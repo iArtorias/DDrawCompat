@@ -16,13 +16,15 @@
 #include <D3dDdi/ShaderAssembler.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
 #include <DDraw/ScopedThreadLock.h>
+#include <DDraw/Surfaces/TagSurface.h>
 #include <Direct3d/Direct3dDevice.h>
 #include <Gdi/DcFunctions.h>
 
 namespace
 {
-	HANDLE g_gdiResourceHandle = nullptr;
 	D3dDdi::Resource* g_gdiResource = nullptr;
+	UINT g_gdiResourceRefCount = 0;
+	bool g_isGdiResourceCreationInProgress = false;
 	bool g_isConfigUpdatePending = false;
 }
 
@@ -227,27 +229,19 @@ namespace D3dDdi
 		m_depthStencil = getResource(resource);
 	}
 
-	void Device::setGdiResourceHandle(HANDLE resource)
+	void Device::setGdiResource()
 	{
-		LOG_FUNC("Device::setGdiResourceHandle", resource);
-		ScopedCriticalSection lock;
-		if (resource == g_gdiResourceHandle)
-		{
-			return;
-		}
-
-		if (g_gdiResource)
-		{
-			g_gdiResource->setAsGdiResource(false);
-		}
-
-		g_gdiResourceHandle = resource;
-		g_gdiResource = findResource(resource);
-
-		if (g_gdiResource)
+		D3dDdi::ScopedCriticalSection lock;
+		if (1 == g_gdiResourceRefCount)
 		{
 			g_gdiResource->setAsGdiResource(true);
 		}
+	}
+
+	void Device::setGdiResourceCreationInProgress(bool inProgress)
+	{
+		ScopedCriticalSection lock;
+		g_isGdiResourceCreationInProgress = inProgress;
 	}
 
 	void Device::setRenderTarget(const D3DDDIARG_SETRENDERTARGET& data)
@@ -317,23 +311,44 @@ namespace D3dDdi
 
 	HRESULT Device::pfnCreateResource2(D3DDDIARG_CREATERESOURCE2* data)
 	{
-		try
+		const bool isGdiResourceCreationInProgress = g_isGdiResourceCreationInProgress && !SurfaceRepository::inCreateSurface();
+		if (isGdiResourceCreationInProgress && g_gdiResource)
 		{
-			auto resource(std::make_unique<Resource>(*this, *data));
-			m_resources.emplace(*resource, std::move(resource));
-			if (data->Flags.VertexBuffer &&
-				D3DDDIPOOL_SYSTEMMEM == data->Pool &&
-				data->pSurfList[0].pSysMem)
+			LOG_ONCE("Using feature: multiple primary surfaces");
+			data->hResource = *g_gdiResource;
+		}
+		else
+		{
+			try
 			{
-				m_drawPrimitive.addSysMemVertexBuffer(data->hResource,
-					static_cast<BYTE*>(const_cast<void*>(data->pSurfList[0].pSysMem)));
+				auto resource(std::make_unique<Resource>(*this, *data));
+				if (isGdiResourceCreationInProgress)
+				{
+					g_gdiResource = resource.get();
+				}
+
+				m_resources.emplace(*resource, std::move(resource));
+
+				if (data->Flags.VertexBuffer &&
+					D3DDDIPOOL_SYSTEMMEM == data->Pool &&
+					data->pSurfList[0].pSysMem)
+				{
+					m_drawPrimitive.addSysMemVertexBuffer(data->hResource,
+						static_cast<BYTE*>(const_cast<void*>(data->pSurfList[0].pSysMem)));
+				}
 			}
-			return S_OK;
+			catch (const HResultException& e)
+			{
+				return e.getResult();
+			}
 		}
-		catch (const HResultException& e)
+
+		if (isGdiResourceCreationInProgress)
 		{
-			return e.getResult();
+			++g_gdiResourceRefCount;
+			g_isGdiResourceCreationInProgress = false;
 		}
+		return S_OK;
 	}
 
 	HRESULT Device::pfnCreateVertexShaderFunc(D3DDDIARG_CREATEVERTEXSHADERFUNC* data, const UINT* code)
@@ -368,6 +383,10 @@ namespace D3dDdi
 		if (g_gdiResource)
 		{
 			g_gdiResource->onDestroyResource(resource);
+			if (resource == *g_gdiResource && 0 != --g_gdiResourceRefCount)
+			{
+				return S_OK;
+			}
 		}
 
 		if (resource == m_sharedPrimary)
@@ -384,6 +403,7 @@ namespace D3dDdi
 			m_depthStencil = nullptr;
 		}
 
+		const HANDLE gdiResourceHandle = g_gdiResource ? *g_gdiResource : nullptr;
 		HRESULT result = m_origVtable.pfnDestroyResource(m_device, resource);
 		if (SUCCEEDED(result))
 		{
@@ -398,11 +418,18 @@ namespace D3dDdi
 			{
 				m_sharedPrimary = nullptr;
 			}
-			if (resource == g_gdiResourceHandle)
+			if (resource == gdiResourceHandle)
 			{
-				g_gdiResourceHandle = nullptr;
 				g_gdiResource = nullptr;
-				DDraw::PrimarySurface::onLost();
+				DDraw::TagSurface::enumTagSurfaces([](DDraw::TagSurface& tagSurface)
+					{
+						auto primary = tagSurface.getPrimary();
+						if (primary)
+						{
+							primary->onLost();
+						}
+						return true;
+					});
 			}
 			m_drawPrimitive.removeSysMemVertexBuffer(resource);
 			m_state.onDestroyResource(res, resource);
@@ -500,6 +527,7 @@ namespace D3dDdi
 	{
 		flushPrimitives();
 		std::vector<D3DDDIARG_PRESENTSURFACE> srcResources(data->phSrcResources, data->phSrcResources + data->SrcResources);
+		const auto origSrcResources = data->phSrcResources;
 		data->phSrcResources = srcResources.data();
 		for (UINT i = 0; i < data->SrcResources; ++i)
 		{
@@ -514,6 +542,7 @@ namespace D3dDdi
 		HRESULT result = m_origVtable.pfnPresent1(m_device, data);
 		Gdi::DcFunctions::disableDibRedirection(false);
 		updateAllConfigNow();
+		data->phSrcResources = origSrcResources;
 		return result;
 	}
 

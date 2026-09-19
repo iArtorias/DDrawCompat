@@ -7,31 +7,43 @@
 
 namespace
 {
-	bool isPrimaryGamma(IDirectDrawGammaControl* gamma)
+	DDraw::PrimarySurface* getPrimary(IDirectDrawGammaControl* gamma)
 	{
-		return CompatPtr<IDirectDrawSurface7>::from(gamma) == DDraw::PrimarySurface::getPrimary();
+		return dynamic_cast<DDraw::PrimarySurface*>(DDraw::Surface::getSurface(*CompatPtr<IDirectDrawSurface7>::from(gamma)));
 	}
 
 	HRESULT STDMETHODCALLTYPE GetGammaRamp(
 		IDirectDrawGammaControl* This, DWORD dwFlags, LPDDGAMMARAMP lpRampData)
 	{
-		if (0 != dwFlags || !lpRampData || !isPrimaryGamma(This))
+		auto primary = getPrimary(This);
+		if (0 != dwFlags || !lpRampData || !primary)
 		{
 			return getOrigVtable(This).GetGammaRamp(This, dwFlags, lpRampData);
 		}
 
-		return DDraw::RealPrimarySurface::getGammaRamp(lpRampData);
+		auto realPrimary = primary->getRealPrimary();
+		if (!realPrimary)
+		{
+			return DDERR_SURFACELOST;
+		}
+		return realPrimary->getGammaRamp(lpRampData);
 	}
 
 	HRESULT STDMETHODCALLTYPE SetGammaRamp(
 		IDirectDrawGammaControl* This, DWORD dwFlags, LPDDGAMMARAMP lpRampData)
 	{
-		if ((0 != dwFlags && DDSGR_CALIBRATE != dwFlags) || !isPrimaryGamma(This))
+		auto primary = getPrimary(This);
+		if ((0 != dwFlags && DDSGR_CALIBRATE != dwFlags) || !primary)
 		{
 			return getOrigVtable(This).SetGammaRamp(This, dwFlags, lpRampData);
 		}
 
-		return DDraw::RealPrimarySurface::setGammaRamp(lpRampData);
+		auto realPrimary = primary->getRealPrimary();
+		if (!realPrimary)
+		{
+			return DDERR_SURFACELOST;
+		}
+		return realPrimary->setGammaRamp(lpRampData);
 	}
 
 	template<>

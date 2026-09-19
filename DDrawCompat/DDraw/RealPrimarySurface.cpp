@@ -5,6 +5,7 @@
 
 #include <Common/CompatPtr.h>
 #include <Common/Hook.h>
+#include <Common/HResultException.h>
 #include <Common/ScopedCriticalSection.h>
 #include <Common/ScopedThreadPriority.h>
 #include <Common/Time.h>
@@ -21,7 +22,6 @@
 #include <D3dDdi/SurfaceRepository.h>
 #include <DDraw/DirectDraw.h>
 #include <DDraw/DirectDrawSurface.h>
-#include <DDraw/IReleaseNotifier.h>
 #include <DDraw/RealPrimarySurface.h>
 #include <DDraw/ScopedThreadLock.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
@@ -41,20 +41,12 @@
 
 namespace
 {
-	void onRelease();
 	void updatePresentationParams();
 
-	CompatWeakPtr<IDirectDrawSurface7> g_frontBuffer;
-	CompatWeakPtr<IDirectDrawSurface7> g_windowedBackBuffer;
 	CompatWeakPtr<IDirectDrawClipper> g_clipper;
-	RECT g_monitorRect = {};
-	DDraw::IReleaseNotifier g_releaseNotifier(onRelease);
 
-	bool g_isFullscreen = false;
 	bool g_isExclusiveFullscreen = false;
 	bool g_suppressLost = false;
-	DDraw::Surface* g_lastFlipSurface = nullptr;
-	DDraw::TagSurface* g_tagSurface = nullptr;
 
 	Compat::CriticalSection g_presentCs;
 	bool g_isOverlayUpdatePending = false;
@@ -63,38 +55,11 @@ namespace
 	long long g_qpcUpdateStart = 0;
 	long long g_qpcLastDelayedUpdate = 0;
 
-	HWND g_deviceWindow = nullptr;
-	HWND* g_deviceWindowPtr = nullptr;
 	HWND g_presentationWindow = nullptr;
 	HWND g_prevPresentationWindow = nullptr;
 	long long g_qpcPrevPresentationWindow = 0;
 
 	Config::AtomicSettingStore g_fpsLimiter(Config::fpsLimiter);
-
-	CompatPtr<IDirectDrawSurface7> getBackBuffer()
-	{
-		DDSCAPS2 caps = {};
-		caps.dwCaps = DDSCAPS_BACKBUFFER;
-		CompatPtr<IDirectDrawSurface7> backBuffer;
-		if (g_frontBuffer)
-		{
-			g_frontBuffer->GetAttachedSurface(g_frontBuffer, &caps, &backBuffer.getRef());
-		}
-		return backBuffer;
-	}
-
-	CompatPtr<IDirectDrawSurface7> getLastSurface()
-	{
-		DDSCAPS2 caps = {};
-		caps.dwCaps = DDSCAPS_FLIP;
-		CompatPtr<IDirectDrawSurface7> backBuffer(getBackBuffer());
-		CompatPtr<IDirectDrawSurface7> lastSurface;
-		if (backBuffer)
-		{
-			backBuffer->GetAttachedSurface(backBuffer, &caps, &lastSurface.getRef());
-		}
-		return lastSurface;
-	}
 
 	UINT getFlipInterval(DWORD flags)
 	{
@@ -138,36 +103,6 @@ namespace
 		return Config::presentDelay.getParam();
 	}
 
-	void onRelease()
-	{
-		LOG_FUNC("RealPrimarySurface::onRelease");
-
-		g_frontBuffer = nullptr;
-		g_lastFlipSurface = nullptr;
-		g_windowedBackBuffer.release();
-		g_isFullscreen = false;
-		g_tagSurface = nullptr;
-
-		g_deviceWindow = nullptr;
-		g_deviceWindowPtr = nullptr;
-	}
-
-	void onRestore()
-	{
-		DDSURFACEDESC2 desc = {};
-		desc.dwSize = sizeof(desc);
-		g_frontBuffer->GetSurfaceDesc(g_frontBuffer, &desc);
-
-		if (g_isExclusiveFullscreen && 0 != (desc.ddsCaps.dwCaps & DDSCAPS_FLIP))
-		{
-			g_frontBuffer->Flip(g_frontBuffer, getLastSurface(), DDFLIP_WAIT);
-			D3dDdi::KernelModeThunks::setPresentEndVsyncCount();
-			D3dDdi::KernelModeThunks::waitForPresentEnd();
-		}
-
-		updatePresentationParams();
-	}
-
 	void presentationBlt(CompatRef<IDirectDrawSurface7> dst, CompatWeakPtr<IDirectDrawSurface7> src)
 	{
 		LOG_FUNC("RealPrimarySurface::presentationBlt", &dst.get(), src.get());
@@ -194,9 +129,9 @@ namespace
 		dstResource->presentationBlt(blt, srcResource);
 	}
 
-	void present(CompatWeakPtr<IDirectDrawSurface7> src, bool isOverlayOnly)
+	void present(DDraw::PrimarySurface* primary, bool isOverlayOnly)
 	{
-		LOG_FUNC("RealPrimarySurface::present", src, isOverlayOnly);
+		LOG_FUNC("RealPrimarySurface::present", primary, isOverlayOnly);
 
 		Gdi::VirtualScreen::update();
 
@@ -228,6 +163,7 @@ namespace
 				Input::updateCursor();
 			});
 
+		auto src = primary ? primary->getDDS() : nullptr;
 		const auto presentationWindow = g_presentationWindow ? g_presentationWindow : g_prevPresentationWindow;
 		if (!src && !presentationWindow)
 		{
@@ -236,19 +172,20 @@ namespace
 			return;
 		}
 
-		const bool useFlip = src && g_isFullscreen;
+		auto realPrimary = primary ? primary->getRealPrimary() : nullptr;
+		const bool useFlip = src && realPrimary && realPrimary->isFullscreen();
 		Win32::DisplayMode::MonitorInfo mi = {};
 		CompatWeakPtr<IDirectDrawSurface7> frontBuffer;
 		CompatPtr<IDirectDrawSurface7> backBuffer;
 		CompatPtr<IDirectDrawSurface7> windowedSrc;
 
-		if (src)
+		if (primary && realPrimary)
 		{
-			mi = DDraw::PrimarySurface::getMonitorInfo();
-			frontBuffer = g_frontBuffer;
-			if (g_isFullscreen)
+			mi = primary->getMonitorInfo();
+			frontBuffer = realPrimary->getSurface();
+			if (realPrimary->isFullscreen())
 			{
-				backBuffer = getBackBuffer();
+				backBuffer = realPrimary->getBackBuffer();
 			}
 		}
 		else
@@ -263,9 +200,9 @@ namespace
 		if (presentationWindow && !backBuffer)
 		{
 			D3dDdi::SurfaceRepository* repo = nullptr;
-			if (src)
+			if (primary)
 			{
-				repo = DDraw::DirectDrawSurface::getSurfaceRepository(*g_tagSurface->getDDS());
+				repo = DDraw::DirectDrawSurface::getSurfaceRepository(*primary->getDDS());
 			}
 			else
 			{
@@ -301,14 +238,22 @@ namespace
 			if (g_isExclusiveFullscreen)
 			{
 				LOG_DEBUG << "Present mode: exclusive fullscreen flip";
-				frontBuffer->Flip(frontBuffer, backBuffer, DDFLIP_WAIT);
+				const HRESULT result = frontBuffer->Flip(frontBuffer, backBuffer, DDFLIP_WAIT);
+				if (FAILED(result))
+				{
+					LOG_DEBUG << "ERROR: exclusive fullscreen flip failed: " << Compat::hex(result);
+				}
 			}
 			else
 			{
 				LOG_DEBUG << "Present mode: borderless fullscreen flip";
-				*g_deviceWindowPtr = presentationWindow;
-				frontBuffer->Flip(frontBuffer, nullptr, DDFLIP_WAIT);
-				*g_deviceWindowPtr = g_deviceWindow;
+				*realPrimary->getDeviceWindowPtr() = presentationWindow;
+				const HRESULT result = frontBuffer->Flip(frontBuffer, nullptr, DDFLIP_WAIT);
+				*realPrimary->getDeviceWindowPtr() = realPrimary->getDeviceWindow();
+				if (FAILED(result))
+				{
+					LOG_DEBUG << "ERROR: borderless fullscreen flip failed: " << Compat::hex(result);
+				}
 			}
 		}
 		else if (frontBuffer)
@@ -323,12 +268,16 @@ namespace
 			{
 				LOG_DEBUG << "Present mode: windowed fullscreen blt";
 				g_clipper->SetHWnd(g_clipper, 0, presentationWindow);
-				frontBuffer->Blt(frontBuffer, nullptr, backBuffer, nullptr, DDBLT_WAIT, nullptr);
+				const HRESULT result = frontBuffer->Blt(frontBuffer, nullptr, backBuffer, nullptr, DDBLT_WAIT, nullptr);
+				if (FAILED(result))
+				{
+					LOG_DEBUG << "ERROR: windowed fullscreen blt failed: " << Compat::hex(result);
+				}
 			}
 			else if (src)
 			{
 				LOG_DEBUG << "Present mode: windowed blt";
-				Gdi::Window::present(*frontBuffer, *src, *g_clipper);
+				Gdi::Window::present(*frontBuffer, *src, *g_clipper, mi.rcEmulated);
 			}
 		}
 		else
@@ -361,7 +310,7 @@ namespace
 		Gdi::Window::setFullscreenMode(0 != mi.cbSize);
 	}
 
-	void updateNow(CompatWeakPtr<IDirectDrawSurface7> src, bool isOverlayOnly)
+	void updateNow(DDraw::PrimarySurface* src, bool isOverlayOnly)
 	{
 		updatePresentationParams();
 
@@ -383,24 +332,42 @@ namespace
 		HWND fullscreenWindow = nullptr;
 		if (DDraw::RealPrimarySurface::isProcessActive())
 		{
-			if (g_isFullscreen && IsWindowVisible(g_deviceWindow) && !IsIconic(g_deviceWindow))
+			const auto mainPrimary = DDraw::TagSurface::getMainPrimary();
+			const auto realPrimary = mainPrimary ? mainPrimary->getRealPrimary() : nullptr;
+			if (realPrimary && realPrimary->isFullscreen() &&
+				IsWindowVisible(realPrimary->getDeviceWindow()) && !IsIconic(realPrimary->getDeviceWindow()))
 			{
-				fullscreenWindow = g_deviceWindow;
+				fullscreenWindow = realPrimary->getDeviceWindow();
 			}
 			else
 			{
 				fullscreenWindow = Gdi::Window::getFullscreenWindow();
 			}
 		}
-		else if (g_isFullscreen)
+		else
 		{
-			setFullscreenPresentationMode({});
-			if (g_prevPresentationWindow)
+			DDraw::PrimarySurface* fullscreenPrimary = nullptr;
+			DDraw::TagSurface::enumTagSurfaces([&](DDraw::TagSurface& tagSurface)
+				{
+					auto primary = tagSurface.getPrimary();
+					if (primary && primary->getRealPrimary() && primary->getRealPrimary()->isFullscreen())
+					{
+						fullscreenPrimary = primary;
+						return false;
+					}
+					return true;
+				});
+
+			if (fullscreenPrimary)
 			{
-				Gdi::GuiThread::destroyWindow(g_prevPresentationWindow);
-				g_prevPresentationWindow = nullptr;
+				setFullscreenPresentationMode({});
+				if (g_prevPresentationWindow)
+				{
+					Gdi::GuiThread::destroyWindow(g_prevPresentationWindow);
+					g_prevPresentationWindow = nullptr;
+				}
+				return;
 			}
-			return;
 		}
 
 		HWND fullscreenPresentationWindow = nullptr;
@@ -413,15 +380,19 @@ namespace
 		g_presentationWindow = fullscreenPresentationWindow;
 
 		static HWND prevFullscreenWindow = nullptr;
-		if (prevFullscreenWindow && prevFullscreenWindow != fullscreenWindow)
+		if (prevFullscreenWindow != fullscreenWindow)
 		{
-			g_prevPresentationWindow = Gdi::Window::getPresentationWindow(prevFullscreenWindow);
-			g_qpcPrevPresentationWindow = Time::queryPerformanceCounter();
-			Gdi::Window::setDpiAwareness(prevFullscreenWindow, false);
-			const HWND prevFullscreenPresentationWindow = Gdi::Window::getPresentationWindow(prevFullscreenWindow);
-			if (prevFullscreenPresentationWindow)
+			LOG_DEBUG << "Fullscreen window changed: " << fullscreenWindow;
+			if (prevFullscreenWindow)
 			{
-				Gdi::Window::updatePresentationWindowPos(prevFullscreenPresentationWindow, prevFullscreenWindow);
+				g_prevPresentationWindow = Gdi::Window::getPresentationWindow(prevFullscreenWindow);
+				g_qpcPrevPresentationWindow = Time::queryPerformanceCounter();
+				Gdi::Window::setDpiAwareness(prevFullscreenWindow, false);
+				const HWND prevFullscreenPresentationWindow = Gdi::Window::getPresentationWindow(prevFullscreenWindow);
+				if (prevFullscreenPresentationWindow)
+				{
+					Gdi::Window::updatePresentationWindowPos(prevFullscreenPresentationWindow, prevFullscreenWindow);
+				}
 			}
 		}
 		prevFullscreenWindow = fullscreenWindow;
@@ -478,9 +449,10 @@ namespace
 
 namespace DDraw
 {
-	HRESULT RealPrimarySurface::create(CompatRef<IDirectDraw> dd)
+	RealPrimarySurface::RealPrimarySurface(CompatRef<IDirectDraw> dd, PrimarySurface& primary)
+		: m_primary(primary)
 	{
-		LOG_FUNC("RealPrimarySurface::create", &dd);
+		LOG_FUNC("RealPrimarySurface::RealPrimarySurface", &dd, &primary);
 
 		DDSURFACEDESC desc = {};
 		desc.dwSize = sizeof(desc);
@@ -501,8 +473,7 @@ namespace DDraw
 
 		if (FAILED(result))
 		{
-			LOG_ONCE("ERROR: Failed to create the real primary surface: " << Compat::hex(result));
-			return result;
+			throw HResultException(result);
 		}
 
 		auto ddLcl = DDraw::DirectDraw::getInt(dd.get()).lpLcl;
@@ -510,23 +481,22 @@ namespace DDraw
 		if (!tagSurface)
 		{
 			LOG_ONCE("ERROR: TagSurface not found");
-			return DDERR_GENERIC;
+			throw HResultException(DDERR_GENERIC);
 		}
 
-		g_isFullscreen = 0 != desc.dwBackBufferCount;
-		auto& mi = PrimarySurface::getMonitorInfo();
-		g_monitorRect = g_isFullscreen && g_isExclusiveFullscreen ? mi.rcReal : mi.rcDpiAware;
+		m_isFullscreen = 0 != desc.dwBackBufferCount;
 
-		g_tagSurface = tagSurface;
-		g_frontBuffer = CompatPtr<IDirectDrawSurface7>::from(surface.get()).detach();
-		g_frontBuffer->SetPrivateData(g_frontBuffer, IID_IReleaseNotifier,
-			&g_releaseNotifier, sizeof(&g_releaseNotifier), DDSPD_IUNKNOWNPOINTER);
+		m_frontBuffer = CompatPtr<IDirectDrawSurface7>::from(surface.get());
 		
-		g_deviceWindowPtr = (0 != desc.dwBackBufferCount) ? DDraw::DirectDraw::getDeviceWindowPtr(dd.get()) : nullptr;
-		g_deviceWindow = g_deviceWindowPtr ? *g_deviceWindowPtr : nullptr;
+		m_deviceWindowPtr = (0 != desc.dwBackBufferCount) ? DDraw::DirectDraw::getDeviceWindowPtr(dd.get()) : nullptr;
+		m_deviceWindow = m_deviceWindowPtr ? *m_deviceWindowPtr : nullptr;
 
-		onRestore();
-		return DD_OK;
+		if (g_isExclusiveFullscreen && (desc.ddsCaps.dwCaps & DDSCAPS_FLIP))
+		{
+			m_frontBuffer->Flip(m_frontBuffer, getLastSurface(), DDFLIP_WAIT);
+			D3dDdi::KernelModeThunks::setPresentEndVsyncCount();
+			D3dDdi::KernelModeThunks::waitForPresentEnd();
+		}
 	}
 
 	void RealPrimarySurface::flip(CompatPtr<IDirectDrawSurface7> surfaceTargetOverride, DWORD flags)
@@ -550,12 +520,12 @@ namespace DDraw
 			scheduleUpdate();
 			if (0 != flipInterval)
 			{
-				g_lastFlipSurface = Surface::getSurface(
-					surfaceTargetOverride ? *surfaceTargetOverride : *PrimarySurface::getLastSurface());
+				m_lastFlipSurface = Surface::getSurface(
+					surfaceTargetOverride ? *surfaceTargetOverride : *m_primary.getLastSurface());
 			}
 			else
 			{
-				g_lastFlipSurface = nullptr;
+				m_lastFlipSurface = nullptr;
 			}
 		}
 
@@ -629,24 +599,52 @@ namespace DDraw
 			}
 		}
 
-		auto primary(DDraw::PrimarySurface::getPrimary());
-		CompatWeakPtr<IDirectDrawSurface7> src;
-		if (primary && SUCCEEDED(primary->IsLost(primary)) &&
-			g_frontBuffer && SUCCEEDED(g_frontBuffer->IsLost(g_frontBuffer)))
+		auto primarySurface = TagSurface::getMainPrimary();
+		auto primary = primarySurface ? primarySurface->getDDS() : nullptr;
+		auto realPrimary = primary ? primarySurface->getRealPrimary() : nullptr;
+		const auto frontBuffer = realPrimary ? realPrimary->getSurface() : nullptr;
+		if (!primary || FAILED(primary->IsLost(primary)) ||
+			!frontBuffer || FAILED(frontBuffer->IsLost(frontBuffer)))
 		{
-			src = primary;
+			primarySurface = nullptr;
+			primary = nullptr;
 		}
 
-		updateNow(src, isOverlayOnly);
+		updateNow(primarySurface, isOverlayOnly);
 
 		RECT emptyRect = {};
-		HRESULT result = src ? src->BltFast(src, 0, 0, src, &emptyRect, DDBLTFAST_WAIT) : DD_OK;
+		HRESULT result = primary ? primary->BltFast(primary, 0, 0, primary, &emptyRect, DDBLTFAST_WAIT) : DD_OK;
 		if (DDERR_SURFACEBUSY == result || DDERR_LOCKEDSURFACES == result)
 		{
 			scheduleUpdate();
 		}
 
 		return 1;
+	}
+
+	CompatPtr<IDirectDrawSurface7> RealPrimarySurface::getBackBuffer()
+	{
+		DDSCAPS2 caps = {};
+		caps.dwCaps = DDSCAPS_BACKBUFFER;
+		CompatPtr<IDirectDrawSurface7> backBuffer;
+		if (m_frontBuffer)
+		{
+			m_frontBuffer->GetAttachedSurface(m_frontBuffer, &caps, &backBuffer.getRef());
+		}
+		return backBuffer;
+	}
+
+	CompatPtr<IDirectDrawSurface7> RealPrimarySurface::getLastSurface()
+	{
+		DDSCAPS2 caps = {};
+		caps.dwCaps = DDSCAPS_FLIP;
+		CompatPtr<IDirectDrawSurface7> backBuffer(getBackBuffer());
+		CompatPtr<IDirectDrawSurface7> lastSurface;
+		if (backBuffer)
+		{
+			backBuffer->GetAttachedSurface(backBuffer, &caps, &lastSurface.getRef());
+		}
+		return lastSurface;
 	}
 
 	Config::AtomicSetting RealPrimarySurface::getFpsLimiter()
@@ -657,7 +655,7 @@ namespace DDraw
 	HRESULT RealPrimarySurface::getGammaRamp(DDGAMMARAMP* rampData)
 	{
 		DDraw::ScopedThreadLock lock;
-		auto gammaControl(CompatPtr<IDirectDrawGammaControl>::from(g_frontBuffer.get()));
+		auto gammaControl(CompatPtr<IDirectDrawGammaControl>::from(m_frontBuffer.get()));
 		if (!gammaControl)
 		{
 			return DDERR_INVALIDPARAMS;
@@ -673,7 +671,7 @@ namespace DDraw
 
 	CompatWeakPtr<IDirectDrawSurface7> RealPrimarySurface::getSurface()
 	{
-		return g_frontBuffer;
+		return m_frontBuffer;
 	}
 
 	HWND RealPrimarySurface::getTopmost()
@@ -695,13 +693,13 @@ namespace DDraw
 
 	bool RealPrimarySurface::isFullscreen()
 	{
-		return g_isFullscreen;
+		return m_isFullscreen;
 	}
 
 	bool RealPrimarySurface::isLost()
 	{
 		DDraw::ScopedThreadLock lock;
-		return g_frontBuffer && !g_suppressLost && DDERR_SURFACELOST == g_frontBuffer->IsLost(g_frontBuffer);
+		return m_frontBuffer && !g_suppressLost && DDERR_SURFACELOST == m_frontBuffer->IsLost(m_frontBuffer);
 	}
 
 	bool RealPrimarySurface::isProcessActive()
@@ -714,37 +712,6 @@ namespace DDraw
 			return GetCurrentProcessId() == pid;
 		}
 		return false;
-	}
-
-	void RealPrimarySurface::release()
-	{
-		DDraw::ScopedThreadLock lock;
-		g_frontBuffer.release();
-	}
-
-	HRESULT RealPrimarySurface::restore()
-	{
-		LOG_FUNC("RealPrimarySurface::restore");
-		DDraw::ScopedThreadLock lock;
-		auto dd(g_tagSurface->getDD());
-		if (g_isFullscreen && FAILED(dd->TestCooperativeLevel(dd)))
-		{
-			return DDERR_NOEXCLUSIVEMODE;
-		}
-
-		HRESULT result = g_frontBuffer->Restore(g_frontBuffer);
-		if (SUCCEEDED(result))
-		{
-			DDGAMMARAMP ramp = {};
-			const HRESULT gammaResult = getGammaRamp(&ramp);
-			release();
-			result = create(*CompatPtr<IDirectDraw>::from(dd.get()));
-			if (SUCCEEDED(result) && SUCCEEDED(gammaResult))
-			{
-				setGammaRamp(&ramp);
-			}
-		}
-		return LOG_RESULT(result);
 	}
 
 	void RealPrimarySurface::scheduleOverlayUpdate()
@@ -786,7 +753,7 @@ namespace DDraw
 	HRESULT RealPrimarySurface::setGammaRamp(DDGAMMARAMP* rampData)
 	{
 		DDraw::ScopedThreadLock lock;
-		auto gammaControl(CompatPtr<IDirectDrawGammaControl>::from(g_frontBuffer.get()));
+		auto gammaControl(CompatPtr<IDirectDrawGammaControl>::from(m_frontBuffer.get()));
 		if (!gammaControl)
 		{
 			return DDERR_INVALIDPARAMS;
@@ -834,9 +801,8 @@ namespace DDraw
 
 	void RealPrimarySurface::waitForFlip(CompatWeakPtr<IDirectDrawSurface7> surface)
 	{
-		auto primary(DDraw::PrimarySurface::getPrimary());
-		if (!surface || !primary || !g_lastFlipSurface ||
-			surface != primary && surface != g_lastFlipSurface->getDDS() ||
+		if (!surface || !m_lastFlipSurface ||
+			surface != m_primary.getDDS() && surface != m_lastFlipSurface->getDDS() ||
 			!D3dDdi::KernelModeThunks::isFlipPending())
 		{
 			return;
