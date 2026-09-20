@@ -73,7 +73,7 @@ namespace DDraw
 			: D3dDdi::getFormat(m_desc.ddpfPixelFormat);
 		if (D3DDDIFMT_UNKNOWN == format)
 		{
-			LOG_ONCE("Unknown resource format: " << format);
+			LOG_ONCE("Unknown resource format: " << m_desc.ddpfPixelFormat);
 		}
 
 		bool isMipMap = (m_desc.ddsCaps.dwCaps & DDSCAPS_MIPMAP) && (m_desc.ddsCaps.dwCaps & DDSCAPS_COMPLEX) &&

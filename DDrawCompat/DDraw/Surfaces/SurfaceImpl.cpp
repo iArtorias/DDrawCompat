@@ -22,6 +22,30 @@
 
 namespace
 {
+	class SurfaceLock : public DDSURFACEDESC
+	{
+	public:
+		SurfaceLock(IDirectDrawSurface* surface) : DDSURFACEDESC{}, m_surface(nullptr)
+		{
+			dwSize = sizeof(DDSURFACEDESC);
+			if (SUCCEEDED(getOrigVtable(surface).Lock(surface, nullptr, this, DDLOCK_WAIT, nullptr)))
+			{
+				m_surface = surface;
+			}
+		}
+
+		~SurfaceLock()
+		{
+			if (m_surface)
+			{
+				getOrigVtable(m_surface).Unlock(m_surface, nullptr);
+			}
+		}
+
+	private:
+		IDirectDrawSurface* m_surface;
+	};
+
 	IDirectDrawClipper* createClipper()
 	{
 		IDirectDrawClipper* clipper = nullptr;
@@ -210,6 +234,29 @@ namespace DDraw
 	template <typename TSurface>
 	HRESULT SurfaceImpl<TSurface>::GetDC(TSurface* This, HDC* lphDC)
 	{
+		if (m_data->m_dcSurface)
+		{
+			{
+				SurfaceLock srcLock(CompatPtr<IDirectDrawSurface>::from(This));
+				SurfaceLock dstLock(m_data->m_dcSurface);
+				if (srcLock.lpSurface && dstLock.lpSurface)
+				{
+					for (unsigned y = 0; y < dstLock.dwHeight; ++y)
+					{
+						auto dst = reinterpret_cast<DWORD*>(static_cast<BYTE*>(dstLock.lpSurface) + y * dstLock.lPitch);
+						auto src = static_cast<BYTE*>(srcLock.lpSurface) + y * srcLock.lPitch;
+						for (unsigned x = 0; x < dstLock.dwWidth; ++x)
+						{
+							*dst = (src[0] << 16) | (src[1] << 8) | src[2];
+							++dst;
+							src += 3;
+						}
+					}
+				}
+			}
+			return m_data->m_dcSurface.get()->lpVtbl->GetDC(m_data->m_dcSurface, lphDC);
+		}
+
 		Gdi::WinProc::startFrame();
 		waitForFlip(m_data->getDDS());
 		HRESULT result = getOrigVtable(This).GetDC(This, lphDC);
@@ -299,6 +346,35 @@ namespace DDraw
 	template <typename TSurface>
 	HRESULT SurfaceImpl<TSurface>::ReleaseDC(TSurface* This, HDC hDC)
 	{
+		if (m_data->m_dcSurface)
+		{
+			HRESULT result = m_data->m_dcSurface.get()->lpVtbl->ReleaseDC(m_data->m_dcSurface, hDC);
+			if (FAILED(result))
+			{
+				return result;
+			}
+
+			SurfaceLock dstLock(CompatPtr<IDirectDrawSurface>::from(This));
+			SurfaceLock srcLock(m_data->m_dcSurface);
+			if (srcLock.lpSurface && dstLock.lpSurface)
+			{
+				for (unsigned y = 0; y < dstLock.dwHeight; ++y)
+				{
+					auto dst = static_cast<BYTE*>(dstLock.lpSurface) + y * dstLock.lPitch;
+					auto src = reinterpret_cast<DWORD*>(static_cast<BYTE*>(srcLock.lpSurface) + y * srcLock.lPitch);
+					for (unsigned x = 0; x < dstLock.dwWidth; ++x)
+					{
+						dst[0] = static_cast<BYTE>(*src >> 16);
+						dst[1] = static_cast<BYTE>(*src >> 8);
+						dst[2] = static_cast<BYTE>(*src);
+						dst += 3;
+						++src;
+					}
+				}
+			}
+			return DD_OK;
+		}
+
 		HRESULT result = getOrigVtable(This).ReleaseDC(This, hDC);
 		if (SUCCEEDED(result) && !(m_data->m_origCaps.dwCaps & DDSCAPS_OWNDC))
 		{

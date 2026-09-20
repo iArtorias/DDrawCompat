@@ -5,6 +5,7 @@
 #include <Common/CompatPtr.h>
 #include <Config/Settings/CompatFixes.h>
 #include <Config/Settings/SurfacePatches.h>
+#include <D3dDdi/FormatInfo.h>
 #include <D3dDdi/SurfaceRepository.h>
 #include <DDraw/DirectDrawSurface.h>
 #include <DDraw/Surfaces/Surface.h>
@@ -137,6 +138,25 @@ namespace DDraw
 			(!(desc.dwFlags & DDSD_PIXELFORMAT) || !isDXTn(desc.ddpfPixelFormat)))
 		{
 			privateData->fixSurfaceMemory(*surface7);
+		}
+
+		if (!(desc.ddsCaps.dwCaps & DDSCAPS_VIDEOMEMORY) &&
+			(desc.dwFlags & DDSD_PIXELFORMAT) &&
+			24 == desc.ddpfPixelFormat.dwRGBBitCount &&
+			0x0000FF == desc.ddpfPixelFormat.dwRBitMask &&
+			0x00FF00 == desc.ddpfPixelFormat.dwGBitMask &&
+			0xFF0000 == desc.ddpfPixelFormat.dwBBitMask)
+		{
+			DDSURFACEDESC dcSurfaceDesc = {};
+			memcpy(&dcSurfaceDesc, &desc, sizeof(dcSurfaceDesc));
+			dcSurfaceDesc.dwSize = sizeof(dcSurfaceDesc);
+			dcSurfaceDesc.ddpfPixelFormat = D3dDdi::getPixelFormat(D3DDDIFMT_X8R8G8B8);
+			dcSurfaceDesc.ddsCaps.dwCaps |= DDSCAPS_SYSTEMMEMORY;
+
+			auto dd1(CompatPtr<IDirectDraw>::from(&dd));
+			g_currentSurfaceCaps = dcSurfaceDesc.ddsCaps;
+			dd1->CreateSurface(dd1, &dcSurfaceDesc, &privateData->m_dcSurface.getRef(), nullptr);
+			g_currentSurfaceCaps = {};
 		}
 
 		attach(*surface7, std::move(privateData));

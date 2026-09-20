@@ -93,6 +93,7 @@ namespace DDraw
 		DWORD m_refCount;
 		SIZE m_sizeOverride;
 		std::unique_ptr<void, void(*)(void*)> m_sysMemBuffer;
+		CompatPtr<IDirectDrawSurface> m_dcSurface;
 		bool m_isPrimary;
 	};
 }
