@@ -37,18 +37,91 @@ NTSTATUS NTAPI NtSetInformationThread(
 
 namespace
 {
+	struct Breakpoint
+	{
+		void* address;
+		unsigned length;
+		Win32::Thread::BreakpointCondition condition;
+	};
+
+	struct DR7
+	{
+		uint32_t L0   : 1;  //     0 DR0 local enable
+		uint32_t G0   : 1;  //     1 DR0 global enable
+		uint32_t L1   : 1;  //     2 DR1 local enable
+		uint32_t G1   : 1;  //     3 DR1 global enable
+		uint32_t L2   : 1;  //     4 DR2 local enable
+		uint32_t G2   : 1;  //     5 DR2 global enable
+		uint32_t L3   : 1;  //     6 DR3 local enable
+		uint32_t G3   : 1;  //     7 DR3 global enable
+		uint32_t LE   : 1;  //     8 Local Exact Breakpoint Enable
+		uint32_t GE   : 1;  //     9 Global Exact Breakpoint Enable
+		uint32_t      : 3;  // 10-12 Reserved
+		uint32_t GD   : 1;  //    13 General Detect Enable
+		uint32_t      : 2;  // 14-15 Reserved
+		uint32_t RW0  : 2;  // 16-17 DR0 condition
+		uint32_t LEN0 : 2;  // 18-19 DR0 length
+		uint32_t RW1  : 2;  // 20-21 DR1 condition
+		uint32_t LEN1 : 2;  // 22-23 DR1 length
+		uint32_t RW2  : 2;  // 24-25 DR2 condition
+		uint32_t LEN2 : 2;  // 26-27 DR2 length
+		uint32_t RW3  : 2;  // 28-29 DR3 condition
+		uint32_t LEN3 : 2;  // 30-31 DR3 length
+	};
+
 	struct ThreadInfo
 	{
 		DWORD id;
 		HANDLE handle;
 		const void* startAddress;
 		bool useCpuAffinity;
+		bool debuggable;
+	};
+
+	class ThreadSuspender
+	{
+	public:
+		ThreadSuspender(DWORD threadId, HANDLE thread, bool condition) : m_threadId(threadId), m_thread(nullptr)
+		{
+			if (condition)
+			{
+				if (-1 == SuspendThread(thread))
+				{
+					LOG_INFO << "ERROR: SuppressThread failed for thread ID "
+						<< Compat::hex(threadId) << ": " << GetLastError();
+				}
+				else
+				{
+					m_thread = thread;
+				}
+			}
+		}
+
+		~ThreadSuspender()
+		{
+			if (m_thread)
+			{
+				if (-1 == ResumeThread(m_thread))
+				{
+					LOG_INFO << "ERROR: SuppressThread failed for thread ID "
+						<< Compat::hex(m_threadId) << ": " << GetLastError();
+				}
+			}
+		}
+
+	private:
+		DWORD m_threadId;
+		HANDLE m_thread;
 	};
 
 	Compat::CriticalSection g_cs;
 	DWORD g_cpuAffinity = 0;
 	std::map<BYTE, BYTE> g_nextProcessor;
 	std::map<DWORD, ThreadInfo> g_threads;
+
+	Breakpoint g_breakpoints[4] = {};
+	unsigned g_nextBreakpointSlot = 0;
+	void* g_vectoredExceptionHandler = nullptr;
 
 	HANDLE g_exclusiveModeMutex = nullptr;
 	thread_local bool g_skipWaitingForExclusiveModeMutex = false;
@@ -60,6 +133,7 @@ namespace
 	std::string maskToString(ULONG_PTR mask);
 	void registerThread(DWORD threadId, const char* msg);
 	void setNextProcessorSet(DWORD fromSet, DWORD toSet);
+	void updateThreadBreakpoints(DWORD threadId, HANDLE thread);
 	bool useCpuAffinityForThread(const void* startAddress);
 
 	HANDLE WINAPI ddrawOpenMutexW(DWORD dwDesiredAccess, BOOL bInheritHandle, LPCWSTR lpName)
@@ -81,6 +155,28 @@ namespace
 			return WAIT_OBJECT_0;
 		}
 		return LOG_RESULT(WaitForSingleObject(hHandle, dwMilliseconds));
+	}
+
+	Breakpoint getBreakpointInfo(const CONTEXT& ctx, unsigned slot)
+	{
+		const auto& dr7 = reinterpret_cast<const DR7&>(ctx.Dr7);
+		Breakpoint bp = {};
+
+#define GET_BP(slot) \
+    bp.address = reinterpret_cast<void*>(ctx.Dr##slot); \
+	bp.length = dr7.LEN##slot + 1; \
+	bp.condition = static_cast<Win32::Thread::BreakpointCondition>(dr7.RW##slot)
+
+		switch (slot)
+		{
+		case 0: GET_BP(0); break;
+		case 1: GET_BP(1); break;
+		case 2: GET_BP(2); break;
+		case 3: GET_BP(3); break;
+		}
+#undef GET_BP
+
+		return bp;
 	}
 
 	std::map<BYTE, std::vector<DWORD>> getProcessorSets()
@@ -199,7 +295,8 @@ namespace
 
 		Compat::Log log(Config::Settings::LogLevel::DEBUG);
 		log << msg << ": ID: " << std::hex << std::setw(4) << std::setfill('0') << threadInfo.id << std::dec
-			<< ", use CPU affinity: " << threadInfo.useCpuAffinity;
+			<< ", use CPU affinity: " << threadInfo.useCpuAffinity
+			<< ", debuggable: " << threadInfo.debuggable;
 		if (threadInfo.startAddress)
 		{
 			log << " (" << Compat::funcPtrToStr(threadInfo.startAddress) << ')';
@@ -262,11 +359,17 @@ namespace
 
 		ThreadInfo threadInfo = {};
 		threadInfo.id = threadId;
-		threadInfo.handle = OpenThread(THREAD_QUERY_INFORMATION | THREAD_SET_INFORMATION, FALSE, threadId);
+		threadInfo.handle = OpenThread(THREAD_QUERY_INFORMATION | THREAD_SET_INFORMATION |
+			THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, threadId);
+		threadInfo.debuggable = threadInfo.handle;
 		if (!threadInfo.handle)
 		{
-			LOG_ONCE("ERROR: OpenThread failed: " << GetLastError());
-			return;
+			threadInfo.handle = OpenThread(THREAD_QUERY_INFORMATION | THREAD_SET_INFORMATION, FALSE, threadId);
+			if (!threadInfo.handle)
+			{
+				LOG_ONCE("ERROR: OpenThread failed: " << GetLastError());
+				return;
+			}
 		}
 
 		if (g_ntQueryInformationThread)
@@ -283,6 +386,10 @@ namespace
 			if (!g_threads.insert({ threadId, threadInfo }).second)
 			{
 				return;
+			}
+			if (threadInfo.debuggable)
+			{
+				updateThreadBreakpoints(threadId, threadInfo.handle);
 			}
 		}
 
@@ -412,6 +519,88 @@ namespace
 		}
 	}
 
+	void updateThreadBreakpoints(DWORD threadId, HANDLE thread)
+	{
+		ThreadSuspender suspender(threadId, thread, GetCurrentThreadId() != threadId);
+
+		CONTEXT ctx = {};
+		ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+		if (!GetThreadContext(thread, &ctx))
+		{
+			LOG_INFO << "ERROR: GetThreadContext failed for thread ID "
+				<< Compat::hex(threadId) << ": " << GetLastError();
+			return;
+		}
+
+		auto& dr7 = reinterpret_cast<DR7&>(ctx.Dr7);
+
+#define SET_BP(slot) \
+    ctx.Dr##slot = reinterpret_cast<DWORD>(g_breakpoints[slot].address); \
+    dr7.L##slot = g_breakpoints[slot].address ? 1: 0; \
+    dr7.G##slot = 0; \
+    dr7.RW##slot = static_cast<unsigned>(g_breakpoints[slot].condition); \
+    dr7.LEN##slot = g_breakpoints[slot].length - 1
+
+		SET_BP(0);
+		SET_BP(1);
+		SET_BP(2);
+		SET_BP(3);
+#undef SET_BP
+
+		if (!SetThreadContext(thread, &ctx))
+		{
+			LOG_DEBUG << "ERROR: SetThreadContext failed for thread ID "
+				<< Compat::hex(threadId) << ": " << GetLastError();
+		}
+	}
+
+	LONG WINAPI vectoredExceptionHandler(EXCEPTION_POINTERS* ExceptionInfo)
+	{
+		if (!ExceptionInfo || !ExceptionInfo->ExceptionRecord || !ExceptionInfo->ContextRecord ||
+			EXCEPTION_SINGLE_STEP != ExceptionInfo->ExceptionRecord->ExceptionCode ||
+			!(ExceptionInfo->ContextRecord->Dr6 & 0xF))
+		{
+			return EXCEPTION_CONTINUE_SEARCH;
+		}
+
+		auto& ctx = *ExceptionInfo->ContextRecord;
+		for (unsigned slot = 0; slot < 4; ++slot)
+		{
+			if (!(ctx.Dr6 & (1 << slot)))
+			{
+				continue;
+			}
+
+			const auto bp = getBreakpointInfo(ctx, slot);
+			Compat::Log log(Config::Settings::LogLevel::INFO);
+			log << (Win32::Thread::BreakpointCondition::EXECUTION == bp.condition ? "Code" : "Data") << " breakpoint:"
+				<< std::setfill('0') << std::hex
+				<< " address=" << std::setw(8) << reinterpret_cast<DWORD>(bp.address)
+				<< " eip=" << std::setw(8) << ctx.Eip
+				<< " eax=" << std::setw(8) << ctx.Eax
+				<< " ebx=" << std::setw(8) << ctx.Ebx
+				<< " ecx=" << std::setw(8) << ctx.Ecx
+				<< " edx=" << std::setw(8) << ctx.Edx
+				<< " esi=" << std::setw(8) << ctx.Esi
+				<< " edi=" << std::setw(8) << ctx.Edi
+				<< " ebp=" << std::setw(8) << ctx.Ebp
+				<< " esp=" << std::setw(8) << ctx.Esp
+				<< std::dec << std::setfill(' ');
+
+			if (Win32::Thread::BreakpointCondition::EXECUTION != bp.condition)
+			{
+				log << " value=";
+				for (int i = bp.length - 1; i >= 0; --i)
+				{
+					log << Compat::HexByte(static_cast<BYTE*>(bp.address)[i]);
+				}
+			}
+		}
+
+		ctx.Dr6 = 0;
+		return EXCEPTION_CONTINUE_EXECUTION;
+	}
+
 	bool useCpuAffinityForThread(const void* startAddress)
 	{
 		if (0 == g_cpuAffinity)
@@ -447,6 +636,28 @@ namespace
 	{
 		Compat::ScopedCriticalSection lock(g_cs);
 		return Config::cpuAffinityRotation.get() && rotateMask(g_cpuAffinity) != g_cpuAffinity;
+	}
+
+	PVOID WINAPI addVectoredExceptionHandler(ULONG First, PVECTORED_EXCEPTION_HANDLER Handler)
+	{
+		LOG_FUNC("AddVectoredExceptionHandler", First, Handler);
+		const auto result = CALL_ORIG_FUNC(AddVectoredExceptionHandler)(First, Handler);
+		if (result && First)
+		{
+			Compat::ScopedCriticalSection lock(g_cs);
+			if (g_vectoredExceptionHandler)
+			{
+				const auto veh = CALL_ORIG_FUNC(AddVectoredExceptionHandler)(1, vectoredExceptionHandler);
+				if (!veh)
+				{
+					LOG_ONCE("ERROR: Failed to reinstall vectored exception handler: " << GetLastError());
+					return result;
+				}
+				RemoveVectoredExceptionHandler(g_vectoredExceptionHandler);
+				g_vectoredExceptionHandler = veh;
+			}
+		}
+		return result;
 	}
 
 	HANDLE WINAPI createThread(LPSECURITY_ATTRIBUTES lpThreadAttributes, SIZE_T dwStackSize,
@@ -507,6 +718,62 @@ namespace Win32
 {
 	namespace Thread
 	{
+		void addBreakpoint(void* address, unsigned length, BreakpointCondition condition)
+		{
+			if (!address)
+			{
+				LOG_INFO << "ERROR: invalid address for breakpoint: " << address;
+				return;
+			}
+
+			if (Win32::Thread::BreakpointCondition::EXECUTION == condition)
+			{
+				if (1 != length)
+				{
+					LOG_INFO << "ERROR: invalid length for code breakpoint: " << length;
+					return;
+				}
+			}
+			else if (4 != length && 2 != length && 1 != length)
+			{
+				LOG_INFO << "ERROR: invalid length for data breakpoint: " << length;
+				return;
+			}
+
+			Compat::ScopedCriticalSection lock(g_cs);
+			for (unsigned slot = 0; slot < 4; ++slot)
+			{
+				if (address == g_breakpoints[slot].address)
+				{
+					return;
+				}
+			}
+
+			g_breakpoints[g_nextBreakpointSlot].address = address;
+			g_breakpoints[g_nextBreakpointSlot].length = length;
+			g_breakpoints[g_nextBreakpointSlot].condition = condition;
+			g_nextBreakpointSlot = (g_nextBreakpointSlot + 1) % 4;
+
+			for (const auto& threadInfo : g_threads)
+			{
+				if (threadInfo.second.debuggable)
+				{
+					updateThreadBreakpoints(threadInfo.first, threadInfo.second.handle);
+				}
+			}
+
+			static bool vehAdded = false;
+			if (!vehAdded)
+			{
+				g_vectoredExceptionHandler = CALL_ORIG_FUNC(AddVectoredExceptionHandler)(1, vectoredExceptionHandler);
+				if (!g_vectoredExceptionHandler)
+				{
+					LOG_ONCE("ERROR: Failed to add vectored exception handler: " << GetLastError());
+				}
+				vehAdded = true;
+			}
+		}
+
 		void applyConfig()
 		{
 			initNextProcessorMap(getProcessorSets());
@@ -599,6 +866,7 @@ namespace Win32
 
 		void installHooks()
 		{
+			HOOK_FUNCTION(kernel32, AddVectoredExceptionHandler, addVectoredExceptionHandler);
 			HOOK_FUNCTION(kernel32, CreateThread, createThread);
 			HOOK_FUNCTION(kernel32, SetProcessAffinityMask, setProcessAffinityMask);
 			HOOK_FUNCTION(kernel32, SetProcessPriorityBoost, setProcessPriorityBoost);
