@@ -666,7 +666,7 @@ namespace D3dDdi
 	{
 		if (m_fixedData.Flags.MatchGdiPrimary)
 		{
-			auto& mi = m_device.getAdapter().getMonitorInfo();
+			const auto mi = m_device.getAdapter().getMonitorInfo();
 			RECT r = DDraw::RealPrimarySurface::isExclusiveFullscreen() ? mi.rcReal : mi.rcDpiAware;
 			if (!IsRectEmpty(&r))
 			{
@@ -1389,7 +1389,7 @@ namespace D3dDdi
 			copySubResourceRegion(*srcRtt.resource, 0, data.SrcRect, *srcResource, data.SrcSubResourceIndex, data.SrcRect);
 		}
 
-		auto& mi = m_device.getAdapter().getMonitorInfo();
+		const auto mi = m_device.getAdapter().getMonitorInfo();
 		presentLayeredWindows(*srcRtt.resource, 0, data.SrcRect, Gdi::Window::getVisibleLayeredWindows(), mi.rcEmulated);
 
 		const auto cursorInfo = Gdi::Cursor::getEmulatedCursorInfo();

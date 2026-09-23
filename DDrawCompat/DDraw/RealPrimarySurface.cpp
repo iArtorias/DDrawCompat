@@ -404,8 +404,8 @@ namespace
 
 		if (g_presentationWindow)
 		{
-			auto& mi = Win32::DisplayMode::getMonitorInfo(CALL_ORIG_FUNC(MonitorFromWindow)(fullscreenWindow, MONITOR_DEFAULTTOPRIMARY));
-			auto& mr = mi.rcDpiAware;
+			const auto mi = Win32::DisplayMode::getMonitorInfo(CALL_ORIG_FUNC(MonitorFromWindow)(fullscreenWindow, MONITOR_DEFAULTTOPRIMARY));
+			const auto& mr = mi.rcDpiAware;
 
 			Gdi::GuiThread::execute([&]()
 				{

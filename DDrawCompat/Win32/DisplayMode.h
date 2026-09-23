@@ -41,10 +41,10 @@ namespace Win32
 		DWORD getBpp();
 		const MonitorInfo& getDesktopMonitorInfo();
 		EmulatedDisplayMode getEmulatedDisplayMode();
-		const MonitorInfo& getMonitorInfo(HMONITOR monitor = nullptr);
-		const MonitorInfo& getMonitorInfo(HWND hwnd);
-		const MonitorInfo& getMonitorInfo(POINT pt);
-		const MonitorInfo& getMonitorInfo(const std::wstring& deviceName);
+		MonitorInfo getMonitorInfo(HMONITOR monitor = nullptr);
+		MonitorInfo getMonitorInfo(HWND hwnd);
+		MonitorInfo getMonitorInfo(POINT pt);
+		MonitorInfo getMonitorInfo(const std::wstring& deviceName);
 		RECT getRealBounds();
 		void incDisplaySettingsUniqueness();
 		ULONG queryDisplaySettingsUniqueness();

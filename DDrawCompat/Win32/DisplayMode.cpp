@@ -995,7 +995,7 @@ namespace Win32
 			return g_desktopMonitorInfo;
 		}
 
-		const MonitorInfo& getMonitorInfo(HMONITOR monitor)
+		MonitorInfo getMonitorInfo(HMONITOR monitor)
 		{
 			Compat::ScopedCriticalSection lock(g_cs);
 			updateMonitorInfo();
@@ -1003,17 +1003,17 @@ namespace Win32
 			return it != g_monitorInfo.end() ? it->second : g_emptyMonitorInfo;
 		}
 
-		const MonitorInfo& getMonitorInfo(HWND hwnd)
+		MonitorInfo getMonitorInfo(HWND hwnd)
 		{
 			return getMonitorInfo(hwnd ? CALL_ORIG_FUNC(MonitorFromWindow)(hwnd, MONITOR_DEFAULTTONEAREST) : nullptr);
 		}
 
-		const MonitorInfo& getMonitorInfo(POINT pt)
+		MonitorInfo getMonitorInfo(POINT pt)
 		{
 			return getMonitorInfo(CALL_ORIG_FUNC(MonitorFromPoint)(pt, MONITOR_DEFAULTTONEAREST));
 		}
 
-		const MonitorInfo& getMonitorInfo(const std::wstring& deviceName)
+		MonitorInfo getMonitorInfo(const std::wstring& deviceName)
 		{
 			Compat::ScopedCriticalSection lock(g_cs);
 			updateMonitorInfo();

@@ -36,7 +36,7 @@ namespace D3dDdi
 		const std::wstring& getDeviceName() const { return m_deviceName; }
 		const AdapterInfo& getInfo() const { return m_info; }
 		LUID getLuid() const { return m_luid; }
-		const auto& getMonitorInfo() const { return Win32::DisplayMode::getMonitorInfo(m_deviceName); }
+		auto getMonitorInfo() const { return Win32::DisplayMode::getMonitorInfo(m_deviceName); }
 		std::pair<D3DDDIMULTISAMPLE_TYPE, UINT> getMultisampleConfig(D3DDDIFORMAT format) const;
 		const D3DDDI_ADAPTERFUNCS& getOrigVtable() const { return m_origVtable; }
 		D3DDDIFORMAT getRenderColorDepthSrcFormat(D3DDDIFORMAT appFormat) const;
