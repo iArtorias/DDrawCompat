@@ -27,11 +27,9 @@ namespace
 	LONG g_height = 0;
 	DWORD g_pitch = 0;
 	DWORD g_startOffset = 0;
+	DWORD g_size = 0;
 	HANDLE g_surfaceFileMapping = nullptr;
 	void* g_surfaceView = nullptr;
-	HANDLE g_lastFullscreenSurfaceFileMapping = nullptr;
-	void* g_lastFullscreenSurfaceView = nullptr;
-	DWORD g_lastFullscreenSurfaceSize = 0;
 	DDraw::PrimarySurface* g_fullscreenPrimary = nullptr;
 
 	HGDIOBJ g_stockBitmap = nullptr;
@@ -181,7 +179,9 @@ namespace Gdi
 		DDSURFACEDESC2 getSurfaceDesc(const RECT& rect)
 		{
 			Compat::ScopedCriticalSection lock(g_cs);
-			if (rect.left < g_bounds.left || rect.top < g_bounds.top ||
+			if (!g_surfaceView ||
+				!g_fullscreenPrimary && !Config::gdiInterops.anyRedirects() ||
+				rect.left < g_bounds.left || rect.top < g_bounds.top ||
 				rect.right > g_bounds.right || rect.bottom > g_bounds.bottom)
 			{
 				return {};
@@ -276,41 +276,44 @@ namespace Gdi
 				g_pitch = (g_width * g_bpp / 8 + 3) & ~3;
 				const DWORD size = (g_height + Config::surfacePatches.getExtraRows(g_height)) * g_pitch + DDraw::Surface::ALIGNMENT;
 
-				if (g_surfaceFileMapping)
+				if (g_fullscreenPrimary || Config::gdiInterops.anyRedirects())
 				{
 					for (auto& dc : g_dcs)
 					{
 						CALL_ORIG_FUNC(DeleteObject)(SelectObject(dc.first, g_stockBitmap));
 					}
-					if (g_surfaceFileMapping != g_lastFullscreenSurfaceFileMapping)
-					{
-						UnmapViewOfFile(g_surfaceView);
-						CloseHandle(g_surfaceFileMapping);
-					}
-					g_surfaceFileMapping = nullptr;
-					g_surfaceView = nullptr;
-				}
 
-				if (g_fullscreenPrimary && size == g_lastFullscreenSurfaceSize)
-				{
-					g_surfaceFileMapping = g_lastFullscreenSurfaceFileMapping;
-					g_surfaceView = g_lastFullscreenSurfaceView;
-				}
-				else if (g_fullscreenPrimary || Config::gdiInterops.anyRedirects())
-				{
-					g_surfaceFileMapping = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, size, nullptr);
-					g_surfaceView = MapViewOfFile(g_surfaceFileMapping, FILE_MAP_WRITE, 0, 0, 0);
-
-					if (g_fullscreenPrimary)
+					if (size > g_size)
 					{
-						if (g_lastFullscreenSurfaceFileMapping)
+						g_size = size;
+
+						if (g_surfaceFileMapping)
 						{
-							UnmapViewOfFile(g_lastFullscreenSurfaceView);
-							CloseHandle(g_lastFullscreenSurfaceFileMapping);
+							UnmapViewOfFile(g_surfaceView);
+							CloseHandle(g_surfaceFileMapping);
+							g_surfaceFileMapping = nullptr;
+							g_surfaceView = nullptr;
 						}
-						g_lastFullscreenSurfaceFileMapping = g_surfaceFileMapping;
-						g_lastFullscreenSurfaceView = g_surfaceView;
-						g_lastFullscreenSurfaceSize = size;
+
+						g_surfaceFileMapping = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, size, nullptr);
+						if (!g_surfaceFileMapping)
+						{
+							LOG_ONCE("ERROR: VirtualScreen::update: CreateFileMapping failed: " << GetLastError());
+							return LOG_RESULT(true);
+						}
+
+						g_surfaceView = MapViewOfFile(g_surfaceFileMapping, FILE_MAP_WRITE, 0, 0, 0);
+						if (!g_surfaceView)
+						{
+							LOG_ONCE("ERROR: VirtualScreen::update: MapViewOfFile failed: " << GetLastError());
+							CloseHandle(g_surfaceFileMapping);
+							g_surfaceFileMapping = nullptr;
+							return LOG_RESULT(true);
+						}
+					}
+					else if (g_surfaceView)
+					{
+						memset(g_surfaceView, 0, size);
 					}
 				}
 
