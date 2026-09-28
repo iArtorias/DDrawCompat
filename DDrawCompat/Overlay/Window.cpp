@@ -232,6 +232,12 @@ namespace Overlay
 		invalidate();
 	}
 
+	void Window::updateZOrder()
+	{
+		CALL_ORIG_FUNC(SetWindowPos)(m_hwnd, getTopmost(), 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE |
+			SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOREDRAW | SWP_NOSENDCHANGING);
+	}
+
 	LRESULT Window::windowProc(UINT uMsg, WPARAM wParam, LPARAM lParam)
 	{
 		switch (uMsg)

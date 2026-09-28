@@ -29,6 +29,7 @@ namespace Overlay
 		void setAlpha(int alpha);
 		void update();
 		void updatePos();
+		void updateZOrder();
 
 	protected:
 		HWND m_hwnd;

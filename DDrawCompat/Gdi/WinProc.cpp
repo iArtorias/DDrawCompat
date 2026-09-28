@@ -75,6 +75,7 @@ namespace
 	void onWindowPosChanging(HWND hwnd, WINDOWPOS& wp);
 	LONG WINAPI setWindowLongA(HWND hWnd, int nIndex, LONG dwNewLong);
 	void setWindowProc(HWND hwnd, WNDPROC wndProcA, WNDPROC wndProcW);
+	void updateOverlayZOrder();
 
 	BOOL WINAPI animateWindow(HWND hWnd, DWORD dwTime, DWORD dwFlags)
 	{
@@ -711,6 +712,11 @@ namespace
 			DDraw::RealPrimarySurface::setPresentationWindowTopmost();
 			Gdi::Window::updateWindowPos(hwnd);
 
+			if ((CALL_ORIG_FUNC(GetWindowLongA)(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) && IsWindowVisible(hwnd))
+			{
+				Gdi::GuiThread::executeAsyncFunc(updateOverlayZOrder);
+			}
+
 			if (g_dwmSetIconicThumbnail && Gdi::isRedirected(hwnd))
 			{
 				const BOOL isIconic = IsIconic(hwnd);
@@ -983,6 +989,21 @@ namespace
 				pULWInfo->pblend ? pULWInfo->pblend->AlphaFormat : 0);
 		}
 		return LOG_RESULT(result);
+	}
+
+	void updateOverlayZOrder()
+	{
+		auto configWindow = Gdi::GuiThread::getConfigWindow();
+		if (configWindow && configWindow->isVisible())
+		{
+			configWindow->updateZOrder();
+		}
+
+		auto statsWindow = Gdi::GuiThread::getStatsWindow();
+		if (statsWindow && statsWindow->isVisible())
+		{
+			statsWindow->updateZOrder();
+		}
 	}
 
 	void CALLBACK winEventProc(
