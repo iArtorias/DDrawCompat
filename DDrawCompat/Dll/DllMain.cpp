@@ -177,7 +177,18 @@ namespace
 		{
 			rtlGetVersion(&vi);
 		}
-		LOG_INFO << "Windows version: " << vi.dwMajorVersion << '.' << vi.dwMinorVersion << '.' << vi.dwBuildNumber;
+
+		Compat::Log log(Config::Settings::LogLevel::INFO);
+		log << "Windows version: " << vi.dwMajorVersion << '.' << vi.dwMinorVersion << '.' << vi.dwBuildNumber;
+
+		DWORD ubr = 0;
+		DWORD ubrSize = sizeof(ubr);
+		if (ERROR_SUCCESS == CALL_ORIG_FUNC(RegGetValueA)(
+			HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "UBR",
+			RRF_RT_REG_DWORD, nullptr, &ubr, &ubrSize))
+		{
+			log << '.' << ubr;
+		}
 	}
 
 	void onDirectDrawCreate(GUID* lpGUID, LPDIRECTDRAW* lplpDD, IUnknown* /*pUnkOuter*/)
