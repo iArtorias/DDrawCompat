@@ -543,6 +543,10 @@ namespace D3dDdi
 		case D3DDDICAPS_GETD3D3CAPS:
 		{
 			auto& caps = static_cast<D3DNTHAL_GLOBALDRIVERDATA*>(pData->pData)->hwCaps;
+			if (caps.dwFlags & D3DDD_DEVICERENDERBITDEPTH)
+			{
+				caps.dwDeviceRenderBitDepth &= DDBD_16 | DDBD_32;
+			}
 			if (caps.dwFlags & D3DDD_DEVICEZBUFFERBITDEPTH)
 			{
 				caps.dwDeviceZBufferBitDepth = getInfo().supportedZBufferBitDepths;
