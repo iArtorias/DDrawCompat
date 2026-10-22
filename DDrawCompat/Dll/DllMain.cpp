@@ -23,6 +23,7 @@
 #include <DDraw/RealPrimarySurface.h>
 #include <DDraw/ScopedThreadLock.h>
 #include <Direct3d/Hooks.h>
+#include <DirectShow/Hooks.h>
 #include <Dll/Dll.h>
 #include <Gdi/Gdi.h>
 #include <Gdi/VirtualScreen.h>
@@ -393,6 +394,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 				static_cast<decltype(&SetAppCompatData)>(&setAppCompatData), "SetAppCompatData");
 		}
 
+		DirectShow::installHooks();
 		Input::installHooks();
 		Win32::MemoryManagement::installHooks();
 		Win32::Thread::installHooks();

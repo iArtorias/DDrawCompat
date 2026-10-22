@@ -24,6 +24,7 @@
 #include <DDraw/DirectDrawSurface.h>
 #include <DDraw/RealPrimarySurface.h>
 #include <DDraw/ScopedThreadLock.h>
+#include <DDraw/Surfaces/OverlaySurface.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
 #include <DDraw/Surfaces/TagSurface.h>
 #include <Gdi/Caret.h>
@@ -169,6 +170,15 @@ namespace
 			});
 
 		auto src = primary ? primary->getDDS() : nullptr;
+		if (primary)
+		{
+			auto composedSrc = DDraw::OverlaySurface::compose( *primary );
+			if (composedSrc)
+			{
+				src = composedSrc;
+			}
+		}
+
 		const auto presentationWindow = g_presentationWindow ? g_presentationWindow : g_prevPresentationWindow;
 		if (!src && !presentationWindow)
 		{

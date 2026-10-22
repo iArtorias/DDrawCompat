@@ -9,6 +9,7 @@
 #include <DDraw/DirectDrawPalette.h>
 #include <DDraw/DirectDrawSurface.h>
 #include <DDraw/RealPrimarySurface.h>
+#include <DDraw/Surfaces/OverlaySurface.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
 #include <DDraw/Surfaces/PrimarySurfaceImpl.h>
 #include <Dll/Dll.h>
@@ -381,6 +382,26 @@ namespace DDraw
 	}
 
 	template <typename TSurface>
+	HRESULT PrimarySurfaceImpl<TSurface>::GetColorKey( TSurface * This, DWORD dwFlags, LPDDCOLORKEY lpDDColorKey )
+	{
+		if (DDCKEY_DESTOVERLAY == dwFlags && OverlaySurface::isEmulationEnabled())
+		{
+			if (!lpDDColorKey)
+			{
+				return DDERR_INVALIDPARAMS;
+			}
+			auto colorKey = getPrimary().getDestOverlayColorKey();
+			if (!colorKey)
+			{
+				return DDERR_NOCOLORKEY;
+			}
+			*lpDDColorKey = *colorKey;
+			return DD_OK;
+		}
+		return SurfaceImpl<TSurface>::GetColorKey( This, dwFlags, lpDDColorKey );
+	}
+
+	template <typename TSurface>
 	HRESULT PrimarySurfaceImpl<TSurface>::GetDC(TSurface* This, HDC* lphDC)
 	{
 		if (FAILED(IsLost(This)))
@@ -481,6 +502,17 @@ namespace DDraw
 			}
 		}
 		return result;
+	}
+
+	template <typename TSurface>
+	HRESULT PrimarySurfaceImpl<TSurface>::SetColorKey( TSurface * This, DWORD dwFlags, LPDDCOLORKEY lpDDColorKey )
+	{
+		if ((dwFlags & DDCKEY_DESTOVERLAY) && OverlaySurface::isEmulationEnabled())
+		{
+			getPrimary().setDestOverlayColorKey( dwFlags, lpDDColorKey );
+			return DD_OK;
+		}
+		return SurfaceImpl<TSurface>::SetColorKey( This, dwFlags, lpDDColorKey );
 	}
 
 	template <typename TSurface>

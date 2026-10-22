@@ -14,6 +14,7 @@
 #include <Config/Settings/DepthFormat.h>
 #include <Config/Settings/DesktopColorDepth.h>
 #include <Config/Settings/DesktopResolution.h>
+#include <Config/Settings/DirectShowAudioRenderer.h>
 #include <Config/Settings/DisplayAspectRatio.h>
 #include <Config/Settings/DisplayFilter.h>
 #include <Config/Settings/DisplayRefreshRate.h>
@@ -80,6 +81,7 @@ namespace Config
 	Settings::DisplayAspectRatio displayAspectRatio;
 	Settings::DesktopColorDepth desktopColorDepth;
 	Settings::DesktopResolution desktopResolution;
+	Settings::DirectShowAudioRenderer directShowAudioRenderer;
 	Settings::DisplayFilter displayFilter;
 	Settings::DisplayRefreshRate displayRefreshRate;
 	Settings::DisplayResolution displayResolution;

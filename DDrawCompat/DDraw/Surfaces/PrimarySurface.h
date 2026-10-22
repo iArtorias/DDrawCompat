@@ -35,6 +35,7 @@ namespace DDraw
 		CompatPtr<IDirectDrawSurface7> getLastSurface();
 		const Win32::DisplayMode::MonitorInfo& getMonitorInfo() { return m_monitorInfo; }
 		CompatWeakPtr<IDirectDrawPalette> getPalette() { return m_palette; }
+		const DDCOLORKEY * getDestOverlayColorKey() const;
 		HANDLE getFrontResource();
 		DWORD getOrigCaps();
 		RealPrimarySurface* getRealPrimary() { return m_realPrimary.get(); }
@@ -42,6 +43,7 @@ namespace DDraw
 		void onLost();
 		HRESULT resetRealPrimary();
 		void setAsRenderTarget();
+		void setDestOverlayColorKey( DWORD flags, const DDCOLORKEY * colorKey );
 		void setPalette(IDirectDrawPalette* palette) { m_palette = palette; }
 		void setWindowedCooperativeLevel();
 		void updateFrontResource();
@@ -61,6 +63,8 @@ namespace DDraw
 		UINT m_frontResourceIndex = 0;
 		Win32::DisplayMode::MonitorInfo m_monitorInfo = {};
 		DWORD m_origCaps = 0;
+		DDCOLORKEY m_destOverlayColorKey = {};
+		bool m_hasDestOverlayColorKey = false;
 		CompatWeakPtr<IDirectDrawPalette> m_palette;
 		std::unique_ptr<RealPrimarySurface> m_realPrimary;
 	};

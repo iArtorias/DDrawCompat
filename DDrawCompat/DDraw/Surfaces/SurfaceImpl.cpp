@@ -178,6 +178,12 @@ namespace DDraw
 	}
 
 	template <typename TSurface>
+	HRESULT SurfaceImpl<TSurface>::AddOverlayDirtyRect( TSurface * This, LPRECT lpRect )
+	{
+		return getOrigVtable( This ).AddOverlayDirtyRect( This, lpRect );
+	}
+
+	template <typename TSurface>
 	HRESULT SurfaceImpl<TSurface>::Blt(
 		TSurface* This, LPRECT lpDestRect, TSurface* lpDDSrcSurface, LPRECT lpSrcRect,
 		DWORD dwFlags, LPDDBLTFX lpDDBltFx)
@@ -232,6 +238,12 @@ namespace DDraw
 	}
 
 	template <typename TSurface>
+	HRESULT SurfaceImpl<TSurface>::GetColorKey( TSurface * This, DWORD dwFlags, LPDDCOLORKEY lpDDColorKey )
+	{
+		return getOrigVtable( This ).GetColorKey( This, dwFlags, lpDDColorKey );
+	}
+
+	template <typename TSurface>
 	HRESULT SurfaceImpl<TSurface>::GetDC(TSurface* This, HDC* lphDC)
 	{
 		if (m_data->m_dcSurface)
@@ -268,9 +280,27 @@ namespace DDraw
 	}
 
 	template <typename TSurface>
+	HRESULT SurfaceImpl<TSurface>::GetFlipStatus( TSurface * This, DWORD dwFlags )
+	{
+		return getOrigVtable( This ).GetFlipStatus( This, dwFlags );
+	}
+
+	template <typename TSurface>
+	HRESULT SurfaceImpl<TSurface>::GetOverlayPosition( TSurface * This, LPLONG lplX, LPLONG lplY )
+	{
+		return getOrigVtable( This ).GetOverlayPosition( This, lplX, lplY );
+	}
+
+	template <typename TSurface>
 	HRESULT SurfaceImpl<TSurface>::GetPalette(TSurface* This, LPDIRECTDRAWPALETTE* lplpDDPalette)
 	{
 		return getOrigVtable(This).GetPalette(This, lplpDDPalette);
+	}
+
+	template <typename TSurface>
+	HRESULT SurfaceImpl<TSurface>::GetPixelFormat( TSurface * This, LPDDPIXELFORMAT lpDDPixelFormat )
+	{
+		return getOrigVtable( This ).GetPixelFormat( This, lpDDPixelFormat );
 	}
 
 	template <typename TSurface>
@@ -397,6 +427,18 @@ namespace DDraw
 	}
 
 	template <typename TSurface>
+	HRESULT SurfaceImpl<TSurface>::SetColorKey( TSurface * This, DWORD dwFlags, LPDDCOLORKEY lpDDColorKey )
+	{
+		return getOrigVtable( This ).SetColorKey( This, dwFlags, lpDDColorKey );
+	}
+
+	template <typename TSurface>
+	HRESULT SurfaceImpl<TSurface>::SetOverlayPosition( TSurface * This, LONG lX, LONG lY )
+	{
+		return getOrigVtable( This ).SetOverlayPosition( This, lX, lY );
+	}
+
+	template <typename TSurface>
 	HRESULT SurfaceImpl<TSurface>::SetPalette(TSurface* This, LPDIRECTDRAWPALETTE lpDDPalette)
 	{
 		return getOrigVtable(This).SetPalette(This, lpDDPalette);
@@ -424,6 +466,19 @@ namespace DDraw
 	HRESULT SurfaceImpl<TSurface>::Unlock(TSurface* This, TUnlockParam lpRect)
 	{
 		return getOrigVtable(This).Unlock(This, lpRect);
+	}
+
+	template <typename TSurface>
+	HRESULT SurfaceImpl<TSurface>::UpdateOverlay( TSurface * This, LPRECT lpSrcRect, TSurface * lpDDDestSurface,
+		LPRECT lpDestRect, DWORD dwFlags, LPDDOVERLAYFX lpDDOverlayFx )
+	{
+		return getOrigVtable( This ).UpdateOverlay( This, lpSrcRect, lpDDDestSurface, lpDestRect, dwFlags, lpDDOverlayFx );
+	}
+
+	template <typename TSurface>
+	HRESULT SurfaceImpl<TSurface>::UpdateOverlayDisplay( TSurface * This, DWORD dwFlags )
+	{
+		return getOrigVtable( This ).UpdateOverlayDisplay( This, dwFlags );
 	}
 
 	template <typename TSurface>

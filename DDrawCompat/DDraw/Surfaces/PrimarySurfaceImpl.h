@@ -26,6 +26,7 @@ namespace DDraw
 		virtual HRESULT Flip(TSurface* This, TSurface* lpDDSurfaceTargetOverride, DWORD dwFlags) override;
 		virtual HRESULT GetAttachedSurface(TSurface* This, TDdsCaps* lpDDSCaps, TSurface** lplpDDAttachedSurface);
 		virtual HRESULT GetCaps(TSurface* This, TDdsCaps* lpDDSCaps) override;
+		virtual HRESULT GetColorKey( TSurface * This, DWORD dwFlags, LPDDCOLORKEY lpDDColorKey ) override;
 		virtual HRESULT GetDC(TSurface* This, HDC* lphDC);
 		virtual HRESULT GetSurfaceDesc(TSurface* This, TSurfaceDesc* lpDDSurfaceDesc) override;
 		virtual HRESULT IsLost(TSurface* This) override;
@@ -33,6 +34,7 @@ namespace DDraw
 			DWORD dwFlags, HANDLE hEvent) override;
 		virtual HRESULT ReleaseDC(TSurface* This, HDC hDC) override;
 		virtual HRESULT Restore(TSurface* This) override;
+		virtual HRESULT SetColorKey( TSurface * This, DWORD dwFlags, LPDDCOLORKEY lpDDColorKey ) override;
 		virtual HRESULT SetPalette(TSurface* This, LPDIRECTDRAWPALETTE lpDDPalette) override;
 		virtual HRESULT Unlock(TSurface* This, TUnlockParam lpRect) override;
 

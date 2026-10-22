@@ -221,6 +221,11 @@ namespace DDraw
 		return surface;
 	}
 
+	const DDCOLORKEY * PrimarySurface::getDestOverlayColorKey() const
+	{
+		return m_hasDestOverlayColorKey ? &m_destOverlayColorKey : nullptr;
+	}
+
 	HANDLE PrimarySurface::getFrontResource()
 	{
 		return *m_frontResource;
@@ -322,6 +327,20 @@ namespace DDraw
 		{
 			resource->setAsRenderTarget();
 		}
+	}
+
+	void PrimarySurface::setDestOverlayColorKey( DWORD flags, const DDCOLORKEY * colorKey )
+	{
+		m_hasDestOverlayColorKey = nullptr != colorKey;
+		if (colorKey)
+		{
+			m_destOverlayColorKey = *colorKey;
+			if (!(flags & DDCKEY_COLORSPACE))
+			{
+				m_destOverlayColorKey.dwColorSpaceHighValue = m_destOverlayColorKey.dwColorSpaceLowValue;
+			}
+		}
+		RealPrimarySurface::scheduleUpdate();
 	}
 
 	void PrimarySurface::setWindowedCooperativeLevel()

@@ -60,21 +60,30 @@ namespace
 	{
 		typedef GetSurfaceType<Vtable>::Type TSurface;
 		SET_COMPAT_METHOD(AddAttachedSurface);
+		SET_COMPAT_METHOD(AddOverlayDirtyRect);
 		SET_COMPAT_METHOD(Blt);
 		SET_COMPAT_METHOD(BltFast);
 		SET_COMPAT_METHOD(Flip);
 		SET_COMPAT_METHOD(GetAttachedSurface);
 		SET_COMPAT_METHOD(GetCaps);
+		SET_COMPAT_METHOD(GetColorKey);
 		SET_COMPAT_METHOD(GetDC);
+		SET_COMPAT_METHOD(GetFlipStatus);
+		SET_COMPAT_METHOD(GetOverlayPosition);
 		SET_COMPAT_METHOD(GetPalette);
+		SET_COMPAT_METHOD(GetPixelFormat);
 		SET_COMPAT_METHOD(GetSurfaceDesc);
 		SET_COMPAT_METHOD(IsLost);
 		SET_COMPAT_METHOD(Lock);
 		SET_COMPAT_METHOD(QueryInterface);
 		SET_COMPAT_METHOD(ReleaseDC);
 		SET_COMPAT_METHOD(Restore);
+		SET_COMPAT_METHOD(SetColorKey);
+		SET_COMPAT_METHOD(SetOverlayPosition);
 		SET_COMPAT_METHOD(SetPalette);
 		SET_COMPAT_METHOD(Unlock);
+		SET_COMPAT_METHOD(UpdateOverlay);
+		SET_COMPAT_METHOD(UpdateOverlayDisplay);
 
 		if constexpr (!std::is_same_v<Vtable, IDirectDrawSurfaceVtbl> && !std::is_same_v<Vtable, IDirectDrawSurface2Vtbl>)
 		{

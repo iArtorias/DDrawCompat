@@ -14,7 +14,7 @@
     <ProjectGuid>{1146187A-17DE-4350-B9D1-9F9EAA934908}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>DDrawCompat</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -183,6 +183,7 @@
     <ClInclude Include="Config\Settings\DepthFormat.h" />
     <ClInclude Include="Config\Settings\DesktopColorDepth.h" />
     <ClInclude Include="Config\Settings\DesktopResolution.h" />
+    <ClInclude Include="Config\Settings\DirectShowAudioRenderer.h" />
     <ClInclude Include="Config\Settings\DisplayAspectRatio.h" />
     <ClInclude Include="Config\Settings\DisplayFilter.h" />
     <ClInclude Include="Config\Settings\DisplayRefreshRate.h" />
@@ -269,6 +270,8 @@
     <ClInclude Include="DDraw\Log.h" />
     <ClInclude Include="DDraw\LogUsedResourceFormat.h" />
     <ClInclude Include="DDraw\ScopedThreadLock.h" />
+    <ClInclude Include="DDraw\Surfaces\OverlaySurface.h" />
+    <ClInclude Include="DDraw\Surfaces\OverlaySurfaceImpl.h" />
     <ClInclude Include="DDraw\Surfaces\PrimarySurface.h" />
     <ClInclude Include="DDraw\Surfaces\PrimarySurfaceImpl.h" />
     <ClInclude Include="DDraw\Surfaces\Surface.h" />
@@ -302,6 +305,14 @@
     <ClInclude Include="Direct3d\Visitors\Direct3dVertexBufferVtblVisitor.h" />
     <ClInclude Include="Direct3d\Visitors\Direct3dViewportVtblVisitor.h" />
     <ClInclude Include="Direct3d\Visitors\Direct3dVtblVisitor.h" />
+    <ClInclude Include="DirectShow\DDrawExclModeVideo.h" />
+    <ClInclude Include="DirectShow\GraphBuilder.h" />
+    <ClInclude Include="DirectShow\Hooks.h" />
+    <ClInclude Include="DirectShow\MediaControl.h" />
+    <ClInclude Include="DirectShow\Visitors\DDrawExclModeVideoVtblVisitor.h" />
+    <ClInclude Include="DirectShow\Visitors\GraphBuilderVtblVisitor.h" />
+    <ClInclude Include="DirectShow\Visitors\MediaControlVtblVisitor.h" />
+    <ClInclude Include="DirectShow\VtableHook.h" />
     <ClInclude Include="Dll\Dll.h" />
     <ClInclude Include="Gdi\CompatDc.h" />
     <ClInclude Include="Gdi\Cursor.h" />
@@ -429,6 +440,8 @@
     <ClCompile Include="DDraw\Log.cpp" />
     <ClCompile Include="DDraw\LogUsedResourceFormat.cpp" />
     <ClCompile Include="DDraw\RealPrimarySurface.cpp" />
+    <ClCompile Include="DDraw\Surfaces\OverlaySurface.cpp" />
+    <ClCompile Include="DDraw\Surfaces\OverlaySurfaceImpl.cpp" />
     <ClCompile Include="DDraw\Surfaces\PrimarySurface.cpp" />
     <ClCompile Include="DDraw\Surfaces\PrimarySurfaceImpl.cpp" />
     <ClCompile Include="DDraw\Surfaces\Surface.cpp" />
@@ -444,6 +457,10 @@
     <ClCompile Include="Direct3d\Direct3dViewport.cpp" />
     <ClCompile Include="Direct3d\Hooks.cpp" />
     <ClCompile Include="Direct3d\Log.cpp" />
+    <ClCompile Include="DirectShow\DDrawExclModeVideo.cpp" />
+    <ClCompile Include="DirectShow\GraphBuilder.cpp" />
+    <ClCompile Include="DirectShow\Hooks.cpp" />
+    <ClCompile Include="DirectShow\MediaControl.cpp" />
     <ClCompile Include="Dll\DllMain.cpp" />
     <ClCompile Include="Dll\Dll.cpp" />
     <ClCompile Include="Gdi\CompatDc.cpp" />

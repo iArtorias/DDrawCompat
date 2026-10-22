@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <map>
 #include <set>
+#include <vector>
 
 #include <Common/Comparison.h>
 #include <Common/CompatPtr.h>
@@ -19,6 +21,7 @@
 #include <DDraw/LogUsedResourceFormat.h>
 #include <DDraw/RealPrimarySurface.h>
 #include <DDraw/ScopedThreadLock.h>
+#include <DDraw/Surfaces/OverlaySurface.h>
 #include <DDraw/Surfaces/PrimarySurface.h>
 #include <DDraw/Surfaces/TagSurface.h>
 #include <DDraw/Visitors/DirectDrawVtblVisitor.h>
@@ -33,6 +36,13 @@ namespace
 
 	LRESULT handleActivateApp(HWND hwnd, WPARAM wParam, LPARAM lParam, WNDPROC origWndProc);
 	LRESULT handleSize(HWND hwnd, WPARAM wParam, LPARAM lParam);
+
+	template <typename TDirectDraw>
+	bool isOverlayEmulated( TDirectDraw & dd )
+	{
+		auto tagSurface = DDraw::TagSurface::get( DDraw::DirectDraw::getInt( dd ).lpLcl );
+		return tagSurface && tagSurface->isOverlayEmulated();
+	}
 
 	template <typename TDirectDraw>
 	HRESULT STDMETHODCALLTYPE CreatePalette(TDirectDraw* This, DWORD dwFlags, LPPALETTEENTRY lpDDColorArray,
@@ -79,6 +89,11 @@ namespace
 		if (lpDDSurfaceDesc->ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE)
 		{
 			return result = DDraw::PrimarySurface::create<TDirectDraw>(*This, *lpDDSurfaceDesc, *lplpDDSurface);
+		}
+
+		if ((lpDDSurfaceDesc->ddsCaps.dwCaps & DDSCAPS_OVERLAY) && isOverlayEmulated( *This ))
+		{
+			return result = DDraw::OverlaySurface::create<TDirectDraw>( *This, *lpDDSurfaceDesc, *lplpDDSurface );
 		}
 
 		TSurfaceDesc desc = *lpDDSurfaceDesc;
@@ -138,9 +153,53 @@ namespace
 			DDCAPS caps = {};
 			memcpy(&caps, lpDDDriverCaps, lpDDDriverCaps->dwSize);
 			Config::capsPatches.applyPatches(caps);
+			if (isOverlayEmulated( *This ))
+			{
+				DDraw::OverlaySurface::addCaps( caps );
+			}
 			memcpy(lpDDDriverCaps, &caps, lpDDDriverCaps->dwSize);
 		}
 		return result;
+	}
+
+	template <typename TDirectDraw>
+	HRESULT STDMETHODCALLTYPE GetFourCCCodes( TDirectDraw * This, LPDWORD lpNumCodes, LPDWORD lpCodes )
+	{
+		if (!lpNumCodes || !isOverlayEmulated( *This ))
+		{
+			return getOrigVtable( This ).GetFourCCCodes( This, lpNumCodes, lpCodes );
+		}
+
+		DWORD numCodes = 0;
+		HRESULT result = getOrigVtable( This ).GetFourCCCodes( This, &numCodes, nullptr );
+		if (FAILED( result ))
+		{
+			return result;
+		}
+
+		std::vector<DWORD> codes( numCodes );
+		if (0 != numCodes)
+		{
+			result = getOrigVtable( This ).GetFourCCCodes( This, &numCodes, codes.data() );
+			if (FAILED( result ))
+			{
+				return result;
+			}
+			codes.resize( numCodes );
+		}
+
+		DDraw::OverlaySurface::addFourCCCodes( codes );
+		if (lpCodes)
+		{
+			const DWORD count = std::min( *lpNumCodes, static_cast<DWORD>(codes.size()) );
+			memcpy( lpCodes, codes.data(), count * sizeof( DWORD ) );
+			*lpNumCodes = count;
+		}
+		else
+		{
+			*lpNumCodes = static_cast<DWORD>(codes.size());
+		}
+		return DD_OK;
 	}
 
 	template <typename TDirectDraw, typename TSurface>
@@ -375,6 +434,7 @@ namespace
 		vtable.CreateSurface = &CreateSurface;
 		vtable.FlipToGDISurface = &FlipToGDISurface;
 		vtable.GetCaps = &GetCaps;
+		vtable.GetFourCCCodes = &GetFourCCCodes;
 		vtable.GetGDISurface = &GetGDISurface;
 		vtable.SetCooperativeLevel = &SetCooperativeLevel;
 		vtable.WaitForVerticalBlank = &WaitForVerticalBlank;

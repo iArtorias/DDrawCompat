@@ -28,7 +28,9 @@ namespace DDraw
 		DWORD getExclusiveOwnerThreadId() const { return m_exclusiveOwnerThreadId; }
 		PrimarySurface* getPrimary() const { return m_primary; }
 		bool isFullscreen() const { return m_fullscreenWindow; }
+		bool isOverlayEmulated() const { return m_isOverlayEmulated; }
 		void setFullscreenWindow(HWND hwnd);
+		void setOverlayEmulated( bool isEmulated ) { m_isOverlayEmulated = isEmulated; }
 		void setPrimary(PrimarySurface* primary) { m_primary = primary; }
 		LONG setWindowStyle(LONG style);
 		LONG setWindowExStyle(LONG exStyle);
@@ -43,6 +45,7 @@ namespace DDraw
 		LONG m_fullscreenWindowStyle = 0;
 		LONG m_fullscreenWindowExStyle = 0;
 		PrimarySurface* m_primary = nullptr;
+		bool m_isOverlayEmulated = false;
 
 		static bool s_inCreateSurface;
 	};
